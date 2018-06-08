@@ -6,9 +6,10 @@
     <i>Churn forecasting at Buffer.</i>
 </p>
 
+<div style="text-align:center"><img src="https://media.giphy.com/media/3owyoRr3kZMz0uV2la/giphy.gif" /></div>
+
 
 ![license](https://img.shields.io/github/license/mashape/apistatus.svg)
-![churnado](https://media.giphy.com/media/3owyoRr3kZMz0uV2la/giphy.gif)
 
 ## Introduction
 
