@@ -6,8 +6,9 @@
     <i>Churn forecasting at Buffer.</i>
 </p>
 
-<div style="text-align:center"><img src="https://media.giphy.com/media/3owyoRr3kZMz0uV2la/giphy.gif" /></div>
-
+<p align="center">
+  <img width="460" height="300" src="https://media.giphy.com/media/3owyoRr3kZMz0uV2la/giphy.gif">
+</p>
 
 ![license](https://img.shields.io/github/license/mashape/apistatus.svg)
 
@@ -45,4 +46,4 @@ Our predictive models must beat the performance of two models:
  Remember that these models must be out-performed on the hold-out validation set.
 
 ## Defining Inputs and Outputs
-We define a customer as churned if they cancel their subscription. Our inputs will consist of snapshot data (billing info) and time series data (detailed usage info). We will use 8 weeks of snapshot and time series data to build our feature sets. We will try to predict whether or not a customer will churn _in the next 4 weeks_. 
+We define a customer as churned if they cancel their subscription. Our inputs will consist of snapshot data (billing info) and time series data (detailed usage info). We will use 8 weeks of snapshot and time series data to build our feature sets. We will try to predict whether or not a customer will churn _in the next 4 weeks_.
