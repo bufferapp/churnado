@@ -21,11 +21,12 @@ That said, there is no correct way to do churn prediction. This repository conta
 ## Requirements
 
 To run and develop `churnado` you'll need a the followint environmental variables under a `.env` file.
-    - `REDSHIFT_ENDPOINT`
-    - `REDSHIFT_DB_PORT`
-    - `REDSHIFT_USER`
-    - `REDSHIFT_PASSWORD`
-    - `REDSHIFT_DB_NAME`
+
+- `REDSHIFT_ENDPOINT`
+- `REDSHIFT_DB_PORT`
+- `REDSHIFT_USER`
+- `REDSHIFT_PASSWORD`
+- `REDSHIFT_DB_NAME`
 
 ## Defining the Problem
 
