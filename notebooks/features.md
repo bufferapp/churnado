@@ -322,10 +322,24 @@ It seems that there is a correlation there. Let's look at the subscription age n
 
 ### Subscription Age
 
+Let's create the double density plot.
+
 ![](features_files/figure-markdown_github-ascii_identifiers/unnamed-chunk-31-1.png)
 
 This is interesting. There's something going on with annual subscriptions. Let's normalize this data.
 
 ![](features_files/figure-markdown_github-ascii_identifiers/unnamed-chunk-32-1.png)
 
-Huh.
+Huh. Now let's look at the number of days since the user's last update.
+
+### Days Since Last Update
+
+We'll start here with another double density plot.
+
+![](features_files/figure-markdown_github-ascii_identifiers/unnamed-chunk-33-1.png)
+
+We can see that a much higher percentage of users that did *not* churn had 0 days since their last update. Let's try a log transformation again since the data is so skewed.
+
+![](features_files/figure-markdown_github-ascii_identifiers/unnamed-chunk-34-1.png)
+
+We can see that there are distinct differences in these distributions, which is a good thing!

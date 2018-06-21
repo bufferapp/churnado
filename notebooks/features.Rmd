@@ -425,6 +425,7 @@ churn_df %>%
 It seems that there is a correlation there. Let's look at the subscription age now.
 
 ### Subscription Age
+Let's create the double density plot.
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
 # plot distribution of updates
@@ -449,7 +450,36 @@ ggplot(churn_df, aes(x = scale(subscription_age), color = did_churn)) +
   guides(color = FALSE)
 ```
 
-Huh.
+Huh. Now let's look at the number of days since the user's last update.
+
+### Days Since Last Update
+We'll start here with another double density plot.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(churn_df, aes(x = days_since_last_update, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 300)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Days Since Last Update", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+We can see that a much higher percentage of users that did _not_ churn had 0 days since their last update. Let's try a log transformation again since the data is so skewed.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(churn_df, aes(x = log(days_since_last_update + 1), color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  # scale_x_continuous(limits = c(0, 500)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Days Since Last Update (Log)", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+We can see that there are distinct differences in these distributions, which is a good thing! 
 
 ```{r include = FALSE}
 detach("package:lubridate", unload = TRUE)
