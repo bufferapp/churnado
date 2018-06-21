@@ -1,0 +1,183 @@
+---
+title: "Single Variable Models"
+output: github_document
+---
+
+The purpose of this notebook is to explore single variable models and determine which features correlate best with the likelihood of churning. The first thing we'll need to do is gather the data from the `data` directory.
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# load libraries
+library(dplyr)
+library(ggplot2)
+library(ROCR)
+```
+
+```{r}
+# read data from csv
+subs <- read.csv('data/features.csv', header = T)
+```
+
+Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set.
+
+```{r}
+# set seed for reproducible results
+set.seed(2356)
+
+# set random groups
+subs$rgroup <- runif(dim(subs)[[1]])
+
+# split out training and testing sets
+training <- subset(subs, rgroup <= 0.8)
+testing <- subset(subs, rgroup > 0.8)
+```
+
+Great, 80% of our data was put into a training set and the remaining 20% in a testing set. 
+
+### Single Variable Models
+Next we'll need to define some functions that will help us make predictions and calculate area under the curve (AUC). The code has been hidded but is available in the .Rmd file.
+
+```{r warning = F, message = F, include = F}
+# Given a vector of outcomes (outCol), a categorical training variable (varCol), 
+# and a prediction variable (appCol), use outCol and varCol to build a single-variable model 
+# and then apply the model to appCol to get new predictions.
+
+pos <- 1
+
+make_prediction_categorical <- function(outCol, varCol, appCol) {
+  
+  # Find how often the outcome is positive during training
+  pPos <- sum(outCol == pos) / length(outCol)
+  
+  # We need this to handle NA values
+  naTab <- table(as.factor(outCol[is.na(varCol)]))
+  
+  # Get stats on how often outcome is positive for NA values in training
+  pPosWna <- (naTab/sum(naTab))[pos]
+  
+  vTab <- table(as.factor(outCol),varCol)
+  
+  # Get stats on how often outcome is positive, conditioned on levels of the variable
+  pPosWv <- (vTab[pos, ] + 1.0e-3 * pPos) / (colSums(vTab) + 1.0e-3)
+  
+  # Make predictions by looking up levels of appCol
+  pred <- pPosWv[appCol]
+  
+  # Add predictions for NA values
+  pred[is.na(appCol)] <- pPosWna
+  
+  # Add in predictions for levels of appCol that weren’t known during training
+  pred[is.na(pred)] <- pPos
+  
+  pred
+
+} 
+
+
+# function to calculate AUC
+calcAUC <- function(predcol,outcol) {
+  
+  perf <- performance(prediction(predcol,outcol==pos),'auc') 
+  as.numeric(perf@y.values)
+  
+}
+
+# function that makes predictions for numeric variables
+make_prediction_numeric <- function(outCol, varCol, appCol) {
+  
+  # Make the cuts to bin the data
+  cuts <- unique(as.numeric(quantile(varCol, probs = seq(0, 1, 0.1), na.rm = T)))
+  cuts <- c(-1, cuts)
+  
+  varC <- cut(varCol, cuts)
+  appC <- cut(appCol, cuts)
+  
+  # Now apply the categorical make prediction function
+  make_prediction_categorical(outCol, varC, appC)
+  
+}
+
+# set `did_churn` column to 0 or 1
+subs <- subs %>% 
+  mutate(did_churn = ifelse(TRUE, 1, 0))
+```
+
+We'll loop through the categorical variables and make predictions. Once the predictions are made, we calculate AUC on the training and testing sets.
+
+```{r}
+# identify categorical varaibles
+catVars <- c('signup_option', 'is_mobile_user', 'billing_interval', 'country', 'simplified_plan_name',
+             'signup_client_name')
+
+# loop through categorical varaibles and mkae predictions
+for(v in catVars) {
+  
+  # Make prediction for each categorical variable
+  pi <- paste('pred', v, sep='_')
+  
+  # Do it for the training and testing datasets
+  training[, pi] <- make_prediction_categorical(training[, "did_churn"], 
+                                               training[, v], training[,v]) 
+  
+  testing[, pi] <- make_prediction_categorical(training[, "did_churn"], 
+                                               training[, v], testing[,v]) 
+}
+```
+
+For each level of the categorical levels, we have the predicted likelihood of a user churning. This is just the proportion of users that churned in each segment.
+
+```{r}
+# calculate AUC for each
+for(v in catVars) {
+  
+  # Name the prediction variables
+  pi <- paste('pred', v, sep = '_')
+  
+  # Find the AUC of the variable on the training set
+  aucTrain <- calcAUC(training[, pi], training[, "did_churn"])
+  
+  # Find the AUC of the variable on the testing set  
+  aucTest <- calcAUC(testing[, pi], testing[, "did_churn"])
+    
+  # Print the results
+  print(sprintf("%s, trainAUC: %4.3f testingAUC: %4.3f", pi, aucTrain, aucTest))
+    
+}
+```
+
+These single variable models aren't any better than random guesses unfortunately. Let's loop through the numeric variables now. The predictions are made by essentially turning the numeric variables into categorical variables by creating "bins". There are a lot of numeric variables.
+
+```{r message = F, warning = F}
+# define numeric variables
+numVars <- c('number_of_profiles', 'number_of_twitter_profiles', 'number_of_facebook_personal_profiles',
+             'number_of_facebook_pages', 'number_of_facebook_groups', 'number_of_instagram_personal_profiles',
+             'number_of_instagram_business_profiles', 'number_of_successful_charges', 
+             'number_of_failed_charges', 'number_of_refunded_charges', 'days_since_last_update',
+             'weeks_with_updates', 'total_updates', 'updates_per_week', 'estimate', 'subscription_age')
+
+# loop through the columns and apply the formula
+for(v in numVars) {
+  
+  # name the prediction column
+  pi <- paste('pred', v, sep = '_')
+  
+  # Make predictions
+  training[, pi] <- make_prediction_numeric(training[, "did_churn"], 
+                                               training[, v], training[,v]) 
+  
+  testing[, pi] <- make_prediction_numeric(training[, "did_churn"], 
+                                               training[, v], testing[,v]) 
+  
+  
+ # Find the AUC of the variable on the training set
+  aucTrain <- calcAUC(training[, pi], training[, "did_churn"])
+  
+  # Find the AUC of the variable on the testing set  
+  aucTest <- calcAUC(testing[, pi], testing[, "did_churn"])
+    
+  # Print the results
+  print(sprintf("%s, trainAUC: %4.3f testingAUC: %4.3f", pi, aucTrain, aucTest))
+    
+}
+```
+
+All of these single variable models perform very poorly. None do any better than random guessing. It seems like the variance in the response cannot be explained sufficiently by any single variable in our dataset. Makes sense.

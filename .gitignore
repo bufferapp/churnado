@@ -106,3 +106,4 @@ venv.bak/
 *.Rproj
 *.rds
 *.csv
+.Rhistory
