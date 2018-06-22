@@ -74,9 +74,9 @@ make_prediction_categorical <- function(outCol, varCol, appCol) {
 
 
 # function to calculate AUC
-calcAUC <- function(predcol,outcol) {
+calcAUC <- function(predcol, outcol) {
   
-  perf <- performance(prediction(predcol,outcol==pos),'auc') 
+  perf <- performance(prediction(predcol, outcol == pos), 'auc') 
   as.numeric(perf@y.values)
   
 }

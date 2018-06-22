@@ -1,0 +1,494 @@
+---
+title: "Logistic Regression Models"
+output: github_document
+---
+
+The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 55% of all the true at-risk subscriptions, with a true positive rate around 68% higher than the overall population rate. The AUC calculated on the testing set is **0.68**.
+
+
+The first thing we'll need to do is gather the data from the `data` directory.
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# load libraries
+library(dplyr)
+library(ggplot2)
+library(scales)
+library(ROCR)
+```
+
+```{r}
+# read data from csv
+subs <- read.csv('data/features.csv', header = T)
+```
+
+Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. Fist, let's simplify by removing subscriptions billed annually.
+
+```{r}
+# remove yearly subscriptions 
+subs <- filter(subs, billing_interval == 'month')
+```
+
+## Exploratory Analysis
+We'll want to be selective with the features we use in our model, so let's do some exploratory analysis to see what's going on with the features. We'll start by looking at the total number of updates sent.
+
+### Updates
+Let's look at how the number of updates is distributed.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = total_updates, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 500)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Total Updates Sent", color = "Churned") +
+  theme(legend.position = "none")
+```
+
+We can see that a greater proportion of churned users had zero updates between October 15, 2017 and January 1, 2018. Both of these distributions appear to be power-law distributed, so it may make sense to apply a transformation. A log transformation would make sense, but we need to figure out what to do with the zeroes. One approach would be to take `log(updates + 1)`, which would conveniently map the zeroes to 0. Let's try it.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = log(total_updates + 1), color = did_churn)) +
+  geom_density(aes(fill = did_churn, alpha = 0.2)) +
+  scale_x_continuous(limits = c(0, 10)) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Log of Updates Sent", color = "Churned") +
+  theme(legend.position = "none")
+```
+
+Interesting, we can see that users that churned seem to have less updates. What if we removed users with zero updates altogether?
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+subs %>% 
+  filter(total_updates > 0) %>% 
+  ggplot(aes(x = log(total_updates), color = did_churn)) +
+  geom_density(aes(fill = did_churn), alpha = 0.4) +
+  scale_x_continuous(limits = c(0, 10)) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Log of Updates Sent", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+This looks better. Now let's graph the growth coefficients of updates per week for churned and non-churned users.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = estimate, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(-100, 100)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Update Count Growth Coefficient", color = "Churned") +
+  theme(legend.position = "none")
+```
+
+That's interesting. A much higher percentage of churned users had a growth coefficient of zero, probably because they had no updates in the time period.
+
+Let's take a look at the number of weeks in which users sent updates. 
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+subs %>% 
+  group_by(did_churn, weeks_with_updates) %>% 
+  summarise(subs = n_distinct(subscription_id)) %>% 
+  mutate(percent = subs / sum(subs)) %>% 
+  ggplot(aes(x = weeks_with_updates, y = percent, fill = did_churn)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Weeks with Updates Created", color = "Churned") +
+  theme(legend.position = "none")
+```
+
+This is useful to see. A higher percentage of users that _didn't_ churn created updates in all 8 weeks. A higher percentage of users that did churn didn't create updates in any of the weeks. It should be useful to include this feature in the final model. It may even make sense to use it as a _categorical_ variable.
+
+```{r}
+# set weeks with updates as categorical
+subs <- subs %>% 
+  mutate(weeks_with_updates = as.factor(weeks_with_updates))
+```
+
+
+Let's shift and have a look at profiles.
+
+### Profiles
+We'll visualize the distribution of the number of profiles users have. I'm guessing that this won't be too useful of a feature, but let's see.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = number_of_profiles, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 100)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Number of Profiles", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+Cool, let's apply a log transformation here because the data is so skewed.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = log(number_of_profiles + 1), color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 5)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Log Number of Profiles", color = "Churned") +
+  theme(legend.position = "none")
+```
+
+These distributions look very similar, which is what we expected. I don't think that this will be an especially helpful feature to include in the model. Let's compare churn rates of users that have used the mobile apps to that of users that did not.
+
+
+### Mobile Users
+Let's see if there is any correlation between churn and whether the user was a mobile user.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+subs %>% 
+  count(is_mobile_user, did_churn) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  filter(did_churn) %>% 
+  ggplot(aes(x = is_mobile_user, y = percent, fill = is_mobile_user)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Mobile User", y = NULL, title = "Percent of Users that Churned") +
+  theme(legend.position = "none")
+```
+
+It seems that there is a correlation there. Users that used one of the mobile apps churned at a significantly lower rate. That's cool. Let's look at the subscription age now. 
+
+### Subscription Age
+Let's create the double density plot.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = subscription_age, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 500)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Subscription Age", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+This is interesting. It seems like a higher percentage of churned subscriptions were "younger". If we normalize this metric we can see that more clearly.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = scale(subscription_age), color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Subscription Age (Scaled)", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+Now let's look at the number of days since the user's last update.
+
+### Days Since Last Update
+We'll create another double density plot to compare the metrics for churned and non-churned subscriptions.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = days_since_last_update, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 300)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Days Since Last Update", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+This is great, we can see that a much higher percentage of non-churned users created an update on the last day, signalling that they were active on the last day. Let's visualize this again with a CDF.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = days_since_last_update, color = did_churn)) +
+  stat_ecdf(size = 1.2) +
+  coord_cartesian(xlim = c(0, 100)) +
+  scale_x_continuous(limits = c(0, 100)) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Days Since Last Update", color = "Churned") 
+```
+
+This is good. We might also create a categorical variable that indicates whether the user created an update in the most recent 4 days. 
+
+```{r}
+# create new variable
+subs <- subs %>% 
+  mutate(update_past_four_days = days_since_last_update <= 4)
+```
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+subs %>% 
+  count(update_past_four_days, did_churn) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  filter(did_churn) %>% 
+  ggplot(aes(x = update_past_four_days, y = percent, fill = update_past_four_days)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Had Update in Last Four Days", y = NULL, title = "Percent of Users that Churned") +
+  theme(legend.position = "none")
+```
+
+Perfect. Now let's take a look at team members.
+
+### Team Members
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = number_of_team_members, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 10)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Number of Team Members", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+This isn't helpful. Let's created a categorical variable that indicates whether or not a user has a team member.
+
+```{r}
+# create categorical team member variable
+subs <- subs %>% 
+  mutate(has_team_member = number_of_team_members >= 1)
+```
+
+Now let's take a look at the numebr of charges that subscriptions had.
+
+### Failed Charges
+We'll start by looking at the number of failed charges that customers had.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs, aes(x = number_of_failed_charges, color = did_churn)) +
+  geom_density(aes(fill = did_churn)) +
+  scale_x_continuous(limits = c(0, 20)) +
+  facet_wrap(~ did_churn) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Failed Charges", fill = "Churned") +
+  guides(color = FALSE)
+```
+
+This isn't helpful. Let's create a categorical variable that tells us if the customer had any failed charges. We'll do the same for refunded charges.
+
+```{r}
+# create new feature
+subs <- subs %>% 
+  mutate(has_failed_charge = number_of_failed_charges >= 1,
+         has_refunded_charge = number_of_refunded_charges >= 1)
+```
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+subs %>% 
+  count(has_failed_charge, did_churn) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  filter(did_churn) %>% 
+  ggplot(aes(x = has_failed_charge, y = percent, fill = has_failed_charge)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Had a Failed Charge", y = NULL, title = "Percent of Users that Churned") +
+  theme(legend.position = "none")
+```
+
+Huh, that is counterintuitive, but there does appear to be a difference there.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+subs %>% 
+  count(has_refunded_charge, did_churn) %>% 
+  mutate(percent = n / sum(n)) %>% 
+  filter(did_churn) %>% 
+  ggplot(aes(x = has_refunded_charge, y = percent, fill = has_refunded_charge)) +
+  geom_bar(stat = 'identity') +
+  scale_y_continuous(labels = percent) +
+  labs(x = "Had a Refunded Charge", y = NULL, title = "Percent of Users that Churned") +
+  theme(legend.position = "none")
+```
+
+Wait, what? It seems that if a customer had a refunded charge they may be _less_ likely to churn. This is counterintuitive, but may be useful in our model.
+
+## Data Partitioning
+Now let's split our data into training and testing sets.
+
+```{r}
+# change values of did_churn
+subs <- subs %>% 
+  filter(simplified_plan_name != 'reply') %>% 
+  mutate(did_churn = ifelse(did_churn, 1, 0))
+
+# set seed for reproducible results
+set.seed(2356)
+
+# set random groups
+subs$rgroup <- runif(dim(subs)[[1]])
+
+# split out training and testing sets
+training <- subset(subs, rgroup <= 0.8)
+testing <- subset(subs, rgroup > 0.8)
+```
+
+Great, 80% of our data was put into a training set and the remaining 20% in a testing set. Now let's build our regression model.
+
+### Logistic Regression
+First we'll need to decide which features to include in our model.
+
+```{r}
+# list features
+features <- c('has_team_member', 'is_mobile_user', 'number_of_profiles', 'has_refunded_charge',
+              'has_failed_charge', 'update_past_four_days', 'estimate', 'weeks_with_updates',
+              'estimate', 'total_updates', 'simplified_plan_name', 'subscription_age')
+
+# collapse list to string
+feature_string <- paste(features, collapse = ' + ')
+
+# model formula
+formula <- paste0('did_churn ~ ', feature_string)
+formula
+```
+
+Let's build our first model.
+
+```{r}
+# first model
+logreg <- glm(formula = formula, data = training, family = binomial(link = "logit"))
+```
+
+Now let's summarize the model.
+
+```{r}
+summary(logreg)
+```
+
+We have a lot of significant factors here. It looks like the number of profiles and total updates don't add much predictive power, so let's remove them. We might try scaling them first though or applying a log transformation.
+
+```{r}
+# list features
+features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'log(total_updates + 1)',
+              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates', 'scale(estimate)',
+              'simplified_plan_name', 'subscription_age')
+
+# collapse list to string
+feature_string <- paste(features, collapse = ' + ')
+
+# model formula
+formula2 <- paste0('did_churn ~ ', feature_string)
+
+# second model
+logreg2 <- glm(formula = formula2, data = training, family = binomial(link = "logit"))
+
+# summarize model
+summary(logreg2)
+```
+
+Ok, let's remove total updates from our final model.
+
+```{r}
+# list features
+features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 
+              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates', 'scale(estimate)',
+              'simplified_plan_name', 'subscription_age')
+
+# collapse list to string
+feature_string <- paste(features, collapse = ' + ')
+
+# model formula
+formula3 <- paste0('did_churn ~ ', feature_string)
+
+# second model
+logreg3 <- glm(formula = formula3, data = training, family = binomial(link = "logit"))
+
+# summarize model
+summary(logreg3)
+```
+
+Time to make some predictions. The additional parameter `type = "response"` tells the `predict()` function to return the predicted probabilities y.
+
+```{r}
+# make predictions
+training$pred <- predict(logreg3, newdata = training, type = "response")
+testing$pred <- predict(logreg3, newdata = testing, type = "response")
+```
+
+Let's plot the predictions for users that churned and users that didn't.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(training, aes(x = pred, color = as.factor(did_churn), linetype = as.factor(did_churn))) +
+  geom_density() + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "Prediction", y = NULL, title = "Predicted Probability of Churning",
+       color = "Churned") +
+  guides(linetype = FALSE)
+```
+
+Now let's make the same plot for the testing set.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(testing, aes(x = pred, color = as.factor(did_churn), linetype = as.factor(did_churn))) +
+  geom_density() + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "Prediction", y = NULL, title = "Predicted Probability of Churning",
+       color = "Churned") +
+  guides(linetype = FALSE)
+```
+
+This is good! In order to use the model as a classifier, we must pick a threshold; scores above the threshold will be classified as positive, those below as negative. Here we can choose something like 15% or 20%. 
+
+The higher we set the threshold, the more precise the classifier will be (we’ll iden- tify a set of situations with a much higher-than-average rate of at-risk births); but we’ll also miss a higher percentage of at-risk situations, as well.
+
+Let's build a confusion matrix using 15% as the threshold.
+
+```{r}
+# build confusion matrix
+confuse <-  table(pred = testing$pred > 0.15, churned = testing$did_churn)
+confuse
+```
+
+Now we can calculate precision, recall, and enrichment. Precision is defined as the number of true positives divided by the number of true positives plus the number of false positives. False positives are cases the model incorrectly labels as positive that are actually negative, or in our example, individuals the model classifies as terrorists that are not. While recall expresses the ability to find all relevant instances in a dataset, precision expresses the proportion of the data points our model says was relevant actually were relevant. 
+
+```{r}
+# calculate precision
+precision <- confuse[2,2] / sum(confuse[2,])
+precision
+```
+
+Seems like we have a lot of false positives, but that might be alright. Recall is the number of true positives divided by the number of true positives plus the number of false negatives.
+
+```{r}
+# calculate recall
+recall <- confuse[2,2] / sum(confuse[,2])
+recall
+```
+
+The ratio of the classifier precision to the average rate of positives is called the enrichment rate.
+
+```{r}
+# calculate enrichment rate
+enrich <- precision / mean(as.numeric(testing$did_churn))
+enrich
+```
+
+Our logistic regression model identifies a set of potential at-risk subscriptions that finds about 55% of all the true at-risk subscriptions, with a true positive rate around 68% higher than the overall population rate.
+
+### AUC
+Let's calculate AUC to evaluate our model's performance.
+
+```{r}
+# define what a positive result is
+pos <- 1
+
+# function to calculate AUC
+calcAUC <- function(predcol, outcol) {
+  
+  perf <- performance(prediction(predcol, outcol == pos), 'auc') 
+  as.numeric(perf@y.values)
+  
+}
+
+# calculate AUC
+calcAUC(testing[, "pred"], testing[, "did_churn"])
+```
+
+Hey, that's not the worst result ever! 
