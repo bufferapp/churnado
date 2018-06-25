@@ -5,7 +5,7 @@ The purpose of this notebook is to explore single variable models and determine 
 
 ``` r
 # read data from csv
-subs <- read.csv('data/features.csv', header = T)
+subs <- read.csv('../data/features.csv', header = T)
 ```
 
 Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set.
@@ -37,16 +37,16 @@ catVars <- c('signup_option', 'is_mobile_user', 'billing_interval', 'country', '
 
 # loop through categorical varaibles and mkae predictions
 for(v in catVars) {
-  
+
   # Make prediction for each categorical variable
   pi <- paste('pred', v, sep='_')
-  
+
   # Do it for the training and testing datasets
-  training[, pi] <- make_prediction_categorical(training[, "did_churn"], 
-                                               training[, v], training[,v]) 
-  
-  testing[, pi] <- make_prediction_categorical(training[, "did_churn"], 
-                                               training[, v], testing[,v]) 
+  training[, pi] <- make_prediction_categorical(training[, "did_churn"],
+                                               training[, v], training[,v])
+
+  testing[, pi] <- make_prediction_categorical(training[, "did_churn"],
+                                               training[, v], testing[,v])
 }
 ```
 
@@ -55,19 +55,19 @@ For each level of the categorical levels, we have the predicted likelihood of a 
 ``` r
 # calculate AUC for each
 for(v in catVars) {
-  
+
   # Name the prediction variables
   pi <- paste('pred', v, sep = '_')
-  
+
   # Find the AUC of the variable on the training set
   aucTrain <- calcAUC(training[, pi], training[, "did_churn"])
-  
-  # Find the AUC of the variable on the testing set  
+
+  # Find the AUC of the variable on the testing set
   aucTest <- calcAUC(testing[, pi], testing[, "did_churn"])
-    
+
   # Print the results
   print(sprintf("%s, trainAUC: %4.3f testingAUC: %4.3f", pi, aucTrain, aucTest))
-    
+
 }
 ```
 
@@ -84,33 +84,33 @@ These single variable models aren't any better than random guesses unfortunately
 # define numeric variables
 numVars <- c('number_of_profiles', 'number_of_twitter_profiles', 'number_of_facebook_personal_profiles',
              'number_of_facebook_pages', 'number_of_facebook_groups', 'number_of_instagram_personal_profiles',
-             'number_of_instagram_business_profiles', 'number_of_successful_charges', 
+             'number_of_instagram_business_profiles', 'number_of_successful_charges',
              'number_of_failed_charges', 'number_of_refunded_charges', 'days_since_last_update',
              'weeks_with_updates', 'total_updates', 'updates_per_week', 'estimate', 'subscription_age')
 
 # loop through the columns and apply the formula
 for(v in numVars) {
-  
+
   # name the prediction column
   pi <- paste('pred', v, sep = '_')
-  
+
   # Make predictions
-  training[, pi] <- make_prediction_numeric(training[, "did_churn"], 
-                                               training[, v], training[,v]) 
-  
-  testing[, pi] <- make_prediction_numeric(training[, "did_churn"], 
-                                               training[, v], testing[,v]) 
-  
-  
+  training[, pi] <- make_prediction_numeric(training[, "did_churn"],
+                                               training[, v], training[,v])
+
+  testing[, pi] <- make_prediction_numeric(training[, "did_churn"],
+                                               training[, v], testing[,v])
+
+
  # Find the AUC of the variable on the training set
   aucTrain <- calcAUC(training[, pi], training[, "did_churn"])
-  
-  # Find the AUC of the variable on the testing set  
+
+  # Find the AUC of the variable on the testing set
   aucTest <- calcAUC(testing[, pi], testing[, "did_churn"])
-    
+
   # Print the results
   print(sprintf("%s, trainAUC: %4.3f testingAUC: %4.3f", pi, aucTrain, aucTest))
-    
+
 }
 ```
 

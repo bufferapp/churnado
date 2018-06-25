@@ -7,7 +7,7 @@ The first thing we'll need to do is gather the data from the `data` directory.
 
 ``` r
 # read data from csv
-subs <- read.csv('data/features.csv', header = T)
+subs <- read.csv('../data/features.csv', header = T)
 ```
 
 Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. Fist, let's simplify by removing subscriptions billed annually.
