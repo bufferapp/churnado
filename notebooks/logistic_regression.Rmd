@@ -21,7 +21,7 @@ library(ROCR)
 subs <- read.csv('data/features.csv', header = T)
 ```
 
-Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. Fist, let's simplify by removing subscriptions billed annually.
+Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. First, let's simplify by removing subscriptions billed annually.
 
 ```{r}
 # remove yearly subscriptions 

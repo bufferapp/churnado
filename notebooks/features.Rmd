@@ -298,7 +298,7 @@ Now, let's save this dataframe and do a bit of exploratory analysis.
 
 ```{r eval = FALSE}
 # write data as csv
-write.csv(churn_df, file = "data/features.csv", row.names = FALSE)
+write.csv(churn_df, file = "~/Desktop/features.csv", row.names = FALSE)
 ```
 
 
