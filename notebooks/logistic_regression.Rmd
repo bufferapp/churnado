@@ -118,7 +118,7 @@ Let's shift and have a look at profiles.
 We'll visualize the distribution of the number of profiles users have. I'm guessing that this won't be too useful of a feature, but let's see.
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
-# plot distribution of updates
+# plot distribution of profiles
 ggplot(subs, aes(x = number_of_profiles, color = did_churn)) +
   geom_density(aes(fill = did_churn)) +
   scale_x_continuous(limits = c(0, 100)) +
@@ -131,7 +131,7 @@ ggplot(subs, aes(x = number_of_profiles, color = did_churn)) +
 Cool, let's apply a log transformation here because the data is so skewed.
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
-# plot distribution of updates
+# plot distribution of profiles
 ggplot(subs, aes(x = log(number_of_profiles + 1), color = did_churn)) +
   geom_density(aes(fill = did_churn)) +
   scale_x_continuous(limits = c(0, 5)) +

@@ -1,0 +1,305 @@
+---
+title: "Deep Learning Approach"
+output: github_document
+---
+
+The purpose of this notebook is to explore artificial neural networks (ANN) and their ability to predict churn. The first model has an AUC of 0.69.
+
+The first thing we'll need to do is gather the data from the `data` directory.
+
+```{r include = FALSE, warning = FALSE, message = FALSE}
+# load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(scales)
+library(keras)
+library(recipes)
+library(corrr)
+library(ROCR)
+```
+
+```{r}
+# read data from csv
+subs <- read.csv('~/data/features.csv', header = T)
+```
+
+Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. First, let's simplify by removing subscriptions billed annually. We'll also add a couple features
+
+```{r}
+# remove yearly subscriptions 
+subs <- filter(subs, billing_interval == 'month' & simplified_plan_name != 'reply') %>% 
+  mutate(has_team_member = !is.na(number_of_team_members) & number_of_team_members > 0,
+         has_refunded_charge = !is.na(number_of_refunded_charges) & number_of_refunded_charges > 0,
+         has_failed_charge = !is.na(number_of_failed_charges) & number_of_failed_charges > 0,
+         total_updates = total_updates + 1,
+         days_since_last_update = days_since_last_update + 1,
+         subscription_age = subscription_age + 1,
+         did_churn = as.factor(did_churn),
+         is_mobile_user = as.factor(is_mobile_user),
+         has_team_member = as.factor(has_team_member),
+         has_refunded_charge = as.factor(has_refunded_charge),
+         has_failed_charge = as.factor(has_failed_charge))
+```
+
+
+We've already done a lot of exploratory analysis in the [logistic regression](https://github.com/bufferapp/churnado/blob/master/notebooks/logistic_regression.md) notebook, so we'll skip that step in this notebook. We can quickly see what this data looks like.
+
+```{r}
+# glimpse data
+glimpse(subs)
+```
+
+Now we'll need to do some preprocessing.
+
+### Data Preprocessing
+First, we “prune” the data, which is nothing more than removing unnecessary columns and rows. Then we split into training and testing sets. After that we explore the training set to uncover transformations that will be needed for deep learning.
+
+There are several columns that we won't use so let's drop them from our dataset.
+
+```{r}
+# drop unneeded columns and remove NAs
+subs_pruned <- subs %>% 
+  select(-(id:locale_browser_language), 
+         -(number_of_twitter_profiles:canceled_at),
+         -(was_active_end_of_year:was_active_two_months),
+         -country, -ios_user, -android_user, -signup_client_name, -billing_interval) %>% 
+  mutate(simplified_plan_name = as.factor(as.character(simplified_plan_name))) %>% 
+  filter(signup_option != "" & simplified_plan_name != "") %>% 
+  na.omit()
+
+# glimpse data
+glimpse(subs_pruned)
+```
+
+That's better. Now let's split the data into training and testing sets.
+
+```{r}
+# set seed for reproducibility
+set.seed(200)
+
+# set random groups
+subs_pruned$rgroup <- runif(dim(subs_pruned)[[1]])
+
+# split out training and testing sets
+training <- subset(subs_pruned, rgroup <= 0.8) %>% select(-rgroup)
+testing <- subset(subs_pruned, rgroup > 0.8) %>% select(-rgroup)
+```
+
+Great, now we'll need to make a few transformations. In general, ANNs work best when the data is one-hot encoded, scaled and centered. In addition, other transformations may be beneficial as well to make relationships easier for the algorithm to identify.
+
+Let's look at the number of profiles as an example.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of profiles
+ggplot(subs_pruned, aes(x = number_of_profiles)) +
+  geom_histogram(binwidth = 1, color = 'white') +
+  coord_cartesian(xlim = c(0, 50)) +
+  scale_x_continuous(limits = c(0, 50)) +
+  labs(x = NULL, y = NULL, title = "Number of Profiles") 
+```
+
+We can see that this is skewed to the left. Let's see if we can spread the data out more by applying a log transformation.
+
+```{r echo = FALSE}
+# plot distribution of profiles
+ggplot(subs_pruned, aes(x = log(number_of_profiles))) +
+  geom_histogram(bins = 20, color = 'white') +
+  labs(x = NULL, y = NULL, title = "Log Profiles") 
+```
+
+This is a better looking distribution. Let's see if this transformation increases the correlation with `did_churn`.
+
+```{r}
+# determine if log transformation improves correlation with churn
+training %>%
+  select(did_churn, number_of_profiles) %>%
+  mutate(did_churn = did_churn %>% as.factor() %>% as.numeric(),
+         log_profiles = log(number_of_profiles)) %>%
+  correlate() %>%
+  focus(did_churn) %>%
+  fashion()
+```
+
+It doubles the magnitude of correlation. Now let's look at updates. 
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs_pruned, aes(x = total_updates)) +
+  geom_density(fill = 'black', alpha = 0.4) +
+  scale_x_continuous(limits = c(0, 200)) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Number of Updates") 
+```
+
+We can see that this distribution is also scaled to the left. Let's apply a variation of the log transformation - we'll add 1 before taking the log so that `log(1) = 0` will be included.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs_pruned, aes(x = log(total_updates))) +
+  geom_density(fill = 'black', alpha = 0.4) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Number of Updates") 
+```
+
+Alright, getting there. Let's see if this transformation increases the correlation with `did_churn`.
+
+```{r}
+# determine if log transformation improves correlation with churn
+training %>%
+  select(did_churn, total_updates) %>%
+  mutate(did_churn = did_churn %>% as.factor() %>% as.numeric(),
+         log_updates = log(total_updates)) %>%
+  mutate(log_updates = replace(log_updates, log_updates == -Inf, 0)) %>%  
+  correlate() %>%
+  focus(did_churn) %>%
+  fashion()
+```
+
+It does increase the magnitude of correlation. This will be useful for us. Let's finally look at the number of days since the user's last update.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of days since last update
+ggplot(subs_pruned, aes(x = days_since_last_update)) +
+  geom_density(fill = 'black', alpha = 0.4) +
+  scale_x_continuous(limits = c(0, 200)) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Days Since Last Update") 
+```
+
+Apply a log transformation.
+
+```{r warning = FALSE, message = FALSE, echo = FALSE}
+# plot distribution of updates
+ggplot(subs_pruned, aes(x = log(days_since_last_update))) +
+  geom_density(fill = 'black', alpha = 0.4) +
+  scale_y_continuous(labels = percent) +
+  labs(x = NULL, y = NULL, title = "Log Days Since Last Update") 
+```
+
+A little better. Let's see if this increases correlation with churn. 
+
+```{r}
+# determine if log transformation improves correlation with churn
+training %>%
+  select(did_churn, days_since_last_update) %>%
+  mutate(did_churn = did_churn %>% as.factor() %>% as.numeric(),
+         log_days_since_last_update = log(days_since_last_update)) %>%
+  mutate(days_since_last_update = replace(days_since_last_update, days_since_last_update == -Inf, 0)) %>%  
+  correlate() %>%
+  focus(did_churn) %>%
+  fashion()
+```
+
+It does.
+
+### ML Recipe
+We'll create a recipe to make transformations, one-hot encode, and scale the data. One-hot encoding is the process of converting categorical data to sparse data, which has columns of only zeros and ones (dummy variables). All non-numeric data will need to be converted to dummy variables.
+
+```{r}
+# create recipe
+rec <- recipe(did_churn ~ ., data = training) %>%
+  step_log(total_updates) %>%
+  step_log(number_of_profiles) %>% 
+  step_log(days_since_last_update) %>% 
+#  step_log(subscription_age) %>% 
+  step_dummy(all_nominal(), -all_outcomes()) %>%
+  step_center(all_predictors(), -all_outcomes()) %>%
+  step_scale(all_predictors(), -all_outcomes()) %>%
+  prep(data = training)
+```
+
+Now let's create vectors for the response variable.
+
+```{r}
+# response variables for training and testing sets
+y_training <- ifelse(pull(training, did_churn) == TRUE, 1, 0)
+y_testing  <- ifelse(pull(testing, did_churn) == TRUE, 1, 0)
+```
+
+Now let's bake with our recipes.
+
+```{r}
+# predictors
+x_train_tbl <- bake(rec, newdata = training) %>% select(-did_churn)
+x_test_tbl  <- bake(rec, newdata = testing) %>% select(-did_churn)
+```
+
+### Building the Network
+
+```{r}
+# build model
+model <- keras_model_sequential() %>% 
+  layer_dense(units = 32, activation = "relu", input_shape = ncol(x_train_tbl)) %>% 
+  layer_dropout(rate = 0.1) %>% 
+  layer_dense(units = 32, activation = "relu") %>% 
+  layer_dropout(rate = 0.1) %>% 
+  layer_dense(units = 1, activation = "sigmoid")
+```
+
+Now let's configure the model.
+
+```{r}
+model %>% compile(
+  optimizer = "rmsprop",
+  loss = "binary_crossentropy",
+  metrics = c("accuracy")
+)
+```
+
+Now let's train the model for 20 epochs.
+
+```{r}
+history <- model %>% fit(
+  x = as.matrix(x_train_tbl),
+  y = y_training,
+  batch_size = 50,
+  epochs = 20,
+  validation_split = 0.20
+)
+```
+
+The model seems to start overfitting pretty quickly. Let's plot the model's performance.
+
+```{r}
+# plot model performance
+plot(history)
+```
+
+Now let's make predictions on the testing set.
+
+```{r}
+# make predictions
+testing$pred <- predict_proba(object = model, x = as.matrix(x_test_tbl)) %>% as.vector()
+```
+
+Cool. Let's quickly make a double density plot.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(testing, aes(x = pred, color = as.factor(did_churn), linetype = as.factor(did_churn))) +
+  geom_density() + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "Prediction", y = NULL, title = "Predicted Probability of Churning",
+       color = "Churned") +
+  guides(linetype = FALSE)
+```
+
+That's somewhat promising. What threhold should we use? Let's calculate AUC.
+
+```{r}
+# define what a positive result is
+pos <- TRUE
+
+# function to calculate AUC
+calcAUC <- function(predcol, outcol) {
+  
+  perf <- performance(prediction(predcol, outcol == pos), 'auc') 
+  as.numeric(perf@y.values)
+  
+}
+
+# calculate AUC
+calcAUC(testing[, "pred"], testing[, "did_churn"])
+```
+
+AUC of 0.69. Just barely above that of the logistic regression model.
