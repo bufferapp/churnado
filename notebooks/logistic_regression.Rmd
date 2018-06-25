@@ -18,7 +18,7 @@ library(ROCR)
 
 ```{r}
 # read data from csv
-subs <- read.csv('../data/features.csv', header = T)
+subs <- read.csv('data/features.csv', header = T)
 ```
 
 Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. Fist, let's simplify by removing subscriptions billed annually.
@@ -102,12 +102,13 @@ subs %>%
   theme(legend.position = "none")
 ```
 
-This is useful to see. A higher percentage of users that _didn't_ churn created updates in all 8 weeks. A higher percentage of users that did churn didn't create updates in any of the weeks. It should be useful to include this feature in the final model. It may even make sense to use it as a _categorical_ variable.
+This is useful to see. A higher percentage of users that _didn't_ churn created updates in all 8 weeks. A higher percentage of users that did churn didn't create updates in any of the weeks. It should be useful to include this feature in the final model. It may even make sense to use it as a _categorical_ variable. We'll also add a boolean variable `no_updates` that indicates whether the user didn't have any updates in the time period.
 
 ```{r}
 # set weeks with updates as categorical
 subs <- subs %>% 
-  mutate(weeks_with_updates = as.factor(weeks_with_updates))
+  mutate(weeks_with_updates = as.factor(weeks_with_updates),
+         no_updates = total_updates == 0)
 ```
 
 
@@ -141,7 +142,6 @@ ggplot(subs, aes(x = log(number_of_profiles + 1), color = did_churn)) +
 ```
 
 These distributions look very similar, which is what we expected. I don't think that this will be an especially helpful feature to include in the model. Let's compare churn rates of users that have used the mobile apps to that of users that did not.
-
 
 ### Mobile Users
 Let's see if there is any correlation between churn and whether the user was a mobile user.
@@ -339,7 +339,8 @@ First we'll need to decide which features to include in our model.
 # list features
 features <- c('has_team_member', 'is_mobile_user', 'number_of_profiles', 'has_refunded_charge',
               'has_failed_charge', 'update_past_four_days', 'estimate', 'weeks_with_updates',
-              'estimate', 'total_updates', 'simplified_plan_name', 'subscription_age')
+              'estimate', 'total_updates', 'simplified_plan_name', 'scale(subscription_age)',
+              'no_updates')
 
 # collapse list to string
 feature_string <- paste(features, collapse = ' + ')
@@ -366,9 +367,9 @@ We have a lot of significant factors here. It looks like the number of profiles 
 
 ```{r}
 # list features
-features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'log(total_updates + 1)',
+features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'total_updates',
               'has_failed_charge', 'update_past_four_days', 'weeks_with_updates', 'scale(estimate)',
-              'simplified_plan_name', 'subscription_age')
+              'simplified_plan_name', 'scale(subscription_age)')
 
 # collapse list to string
 feature_string <- paste(features, collapse = ' + ')
@@ -383,12 +384,12 @@ logreg2 <- glm(formula = formula2, data = training, family = binomial(link = "lo
 summary(logreg2)
 ```
 
-Ok, let's remove total updates from our final model.
+Ok, let's remove total updates and the growth coefficient from our final model.
 
 ```{r}
 # list features
 features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 
-              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates', 'scale(estimate)',
+              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates',
               'simplified_plan_name', 'subscription_age')
 
 # collapse list to string
