@@ -12,6 +12,10 @@ select
   , count(distinct case when c.captured and c.paid and c.refunded = false then c.id else null end) as successful_charges
   , count(distinct case when c.refunded then c.id else null end) as refunded_charges
   , count(distinct case when c.paid = false and c.captured = false then c.id else null end) as failed_charges
+  , case
+    when canceled_at between '{{ var('t') }}' and dateadd(month, 2, '{{ var('t') }}') then True
+    else False
+    end as churned_in_next_two_months
 from dbt.stripe_subscriptions as s
 join dbt.stripe_invoices as i -- join invoices and charges created before Dec 31
   on i.subscription_id = s.id
@@ -29,6 +33,7 @@ where
   and s.simplified_plan_id != 'reply' -- only want publish subscriptions
   and s.simplified_plan_id != 'analyze'
   and s.created_at between dateadd(year, -1, '{{ var('t') }}') and '{{ var('t') }}'
+  and (s.canceled_at > '{{ var('t') }}' or s.canceled_at is null)
   -- only want subscriptions with at least one successful charge
   and s.successful_charges >= 1
 {{ dbt_utils.group_by(n=10) }}
