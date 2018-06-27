@@ -18,16 +18,16 @@ join dbt.stripe_invoices as i -- join invoices and charges created before Dec 31
   and i.paid
   and i.amount_due is not null
   and i.amount_due > 0
-  and i.date <= '2017-12-31'
+  and i.date < '2018-01-01'
 join dbt.stripe_charges as c
   on c.invoice = i.id
   and c.amount is not null
   and c.amount > 0
-  and c.created <= '2017-12-31'
+  and c.created < '2018-01-01'
 where
   s.billing_interval = 'month' -- only include monthly subscriptions created after Jan 1, 2017
   and s.simplified_plan_id != 'reply' -- only want publish subscriptions
   and s.simplified_plan_id != 'analyze'
-  and s.created_at between '2017-01-01' and '2018-02-01'
+  and s.created_at between '2017-01-01' and '2018-01-01'
   and s.successful_charges >= 1 -- only want subscriptions with at least one successful charge
 group by 1,2,3,4,5,6,7,8,9,10
