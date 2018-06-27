@@ -17,7 +17,7 @@ select
     else False
     end as churned_in_next_two_months
 from dbt.stripe_subscriptions as s
-join dbt.stripe_invoices as i -- join invoices and charges created before Dec 31
+join dbt.stripe_invoices as i
   on i.subscription_id = s.id
   and i.paid
   and i.amount_due is not null
@@ -29,10 +29,13 @@ join dbt.stripe_charges as c
   and c.amount > 0
   and c.created < '{{ var('t') }}'
 where
-  s.billing_interval = 'month' -- only include monthly subscriptions created after Jan 1, 2017
-  and s.simplified_plan_id != 'reply' -- only want publish subscriptions
-  and s.simplified_plan_id != 'analyze'
+  -- only include monthly subscriptions created after Jan 1, 2017
+  s.billing_interval = 'month'
+  -- only want publish subscriptions
+  and s.simplified_plan_id != 'reply' and s.simplified_plan_id != 'analyze'
+  -- only subscriptions created one year before
   and s.created_at between dateadd(year, -1, '{{ var('t') }}') and '{{ var('t') }}'
+  -- only subscriptions that were active on the time
   and (s.canceled_at > '{{ var('t') }}' or s.canceled_at is null)
   -- only want subscriptions with at least one successful charge
   and s.successful_charges >= 1
