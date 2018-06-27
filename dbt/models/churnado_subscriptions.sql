@@ -9,7 +9,6 @@ select
   , s.trial_start_at
   , s.trial_end_at
   , u.id as user_id
-  , datediff(day, s.trial_start_at, s.trial_end_at) as trial_length
   , case -- if subscription was active on Dec 31 and was created two months before, we can use it in the training set
       when s.created_at < '2017-11-01' and (s.canceled_at is null or s.canceled_at > '2017-12-31')
       then true
