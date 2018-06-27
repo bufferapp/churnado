@@ -30,4 +30,4 @@ where
   and s.simplified_plan_id != 'analyze'
   and s.created_at between '2017-01-01' and '2018-02-01'
   and s.successful_charges >= 1 -- only want subscriptions with at least one successful charge
-group by 1,2,3,4,5,6,7,8,9,10,11,12
+group by 1,2,3,4,5,6,7,8,9,10
