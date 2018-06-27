@@ -9,11 +9,6 @@ select
   , s.quantity
   , s.trial_start_at
   , s.trial_end_at
-  , case -- if subscription was active on Dec 31 and was created two months before, we can use it in the training set
-      when s.created_at < '2017-11-01' and (s.canceled_at is null or s.canceled_at > '2017-12-31')
-      then true
-      else false
-    end as is_training
   , count(distinct case when c.captured and c.paid and c.refunded = false then c.id else null end) as successful_charges
   , count(distinct case when c.refunded then c.id else null end) as refunded_charges
   , count(distinct case when c.paid = false and c.captured = false then c.id else null end) as failed_charges
