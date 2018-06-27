@@ -13,13 +13,13 @@ select
   , count(distinct case when c.refunded then c.id else null end) as refunded_charges
   , count(distinct case when c.paid = false and c.captured = false then c.id else null end) as failed_charges
 from dbt.stripe_subscriptions as s
-left join dbt.stripe_invoices as i -- join invoices and charges created before Dec 31
+join dbt.stripe_invoices as i -- join invoices and charges created before Dec 31
   on i.subscription_id = s.id
   and i.paid
   and i.amount_due is not null
   and i.amount_due > 0
   and i.date <= '2017-12-31'
-left join dbt.stripe_charges as c
+join dbt.stripe_charges as c
   on c.invoice = i.id
   and c.amount is not null
   and c.amount > 0
