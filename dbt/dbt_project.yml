@@ -32,3 +32,5 @@ clean-targets:         # directories to be removed by `dbt clean`
 models:
   churnado:
     materialized: view
+    vars:
+      t: "2018-01-01"
