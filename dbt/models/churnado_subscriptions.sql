@@ -13,6 +13,7 @@ select
   , count(distinct case when c.refunded then c.id else null end) as refunded_charges
   , count(distinct case when c.paid = false and c.captured = false then c.id else null end) as failed_charges
   , case
+    -- subscriptions that churn within two months of the train date are labeled as churned
     when canceled_at between '{{ var('t') }}' and dateadd(month, 2, '{{ var('t') }}') then True
     else False
     end as churned_in_next_two_months
@@ -35,7 +36,7 @@ where
   and s.simplified_plan_id != 'reply' and s.simplified_plan_id != 'analyze'
   -- only subscriptions created one year before
   and s.created_at between dateadd(year, -1, '{{ var('t') }}') and '{{ var('t') }}'
-  -- only subscriptions that were active on the time
+  -- only subscriptions that were active on the training date
   and (s.canceled_at > '{{ var('t') }}' or s.canceled_at is null)
   -- only want subscriptions with at least one successful charge
   and s.successful_charges >= 1
