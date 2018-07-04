@@ -6,7 +6,7 @@ default:
   outputs:
     production:
       type: redshift
-      threads: 2
+      threads: 4
       host: "{{ env_var('REDSHIFT_ENDPOINT') }}"
       port: "{{ env_var('REDSHIFT_DB_PORT') }}"
       user: "{{ env_var('REDSHIFT_USER') }}"
