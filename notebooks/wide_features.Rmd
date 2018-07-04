@@ -1,0 +1,140 @@
+---
+title: "R Notebook"
+output: github_document
+---
+
+This is inspired by these two [great](http://www.win-vector.com/blog/2015/07/working-with-sessionized-data-1-evaluating-hazard-models/) [posts](http://www.win-vector.com/blog/2015/07/working-with-sessionized-data-2-variable-selection/) from the Win Vector data science blog.
+
+The basic idea is that we take a tidy "skinny" dataframe and make it wide. We have update counts for each user and each week, but we also want update counts for every possible time window in the two-month period. This will be tricky, but let's see if we can do it with `dplyr` and `tidyr`. 
+
+```{r setup, include = F, warning = FALSE, message = FALSE}
+# Load libraries
+library(buffer)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+Next we set the training date, i.e. the date at which we want subscriptions to be active.
+
+```{r warning = FALSE, message = FALSE}
+training_date <- '2017-12-31'
+```
+
+First we'll query Redshift to get subscriptions that were active on the training date, December 31, 2017.
+
+```{r include = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+
+```{sql connection = con, output.var = subscriptions}
+select
+  s.id as subscription_id
+  , s.customer_id
+  , u.id as user_id
+  , s.plan_id
+  , s.simplified_plan_id
+  , s.canceled_at as canceled_at
+  , s.created_at as created_at
+  , s.quantity
+  , count(distinct case when c.captured and c.paid and c.refunded = false then c.id else null end) as successful_charges
+  , count(distinct case when c.refunded then c.id else null end) as refunded_charges
+  , count(distinct case when c.paid = false and c.captured = false then c.id else null end) as failed_charges
+  , case
+    -- subscriptions that churn within two months of the train date are labeled as churned
+    when canceled_at between ?training_date and dateadd(month, 2, ?training_date) then True
+    else False
+    end as churned_in_next_two_months
+from dbt.stripe_subscriptions as s
+join dbt.users as u
+  on u.billing_stripe_customer_id = s.customer_id
+join dbt.stripe_invoices as i
+  on i.subscription_id = s.id
+  and i.paid
+  and i.amount_due is not null
+  and i.amount_due > 0
+  and i.date < ?training_date
+join dbt.stripe_charges as c
+  on c.invoice = i.id
+  and c.amount is not null
+  and c.amount > 0
+  and c.created < ?training_date
+where
+  -- only include monthly subscriptions created after Jan 1, 2017
+  s.billing_interval = 'month'
+  -- only want publish subscriptions
+  and s.simplified_plan_id != 'reply' and s.simplified_plan_id != 'analyze'
+  -- only subscriptions created one year before
+  and s.created_at between dateadd(year, -1, ?training_date) and ?training_date
+  -- only subscriptions that were active on the training date
+  and (s.canceled_at > ?training_date or s.canceled_at is null)
+  -- only want subscriptions with at least one successful charge
+  and s.successful_charges >= 1
+group by 1,2,3,4,5,6,7,8
+```
+
+There are only 22 thousand subscriptions that fit this criteria, but that's alright. Next we'll need to format a list of user IDs so that we can query Redshift to get their update counts. 
+
+```{r}
+# get user ids
+user_ids <- paste(shQuote(subscriptions$user_id), collapse = ',')
+
+# remove double quotes
+user_ids <- as.factor(noquote(user_ids))
+```
+
+Now let's get their weekly updates. For each user and week, we'll gather the number of updates they created.
+
+```{sql connection = con, output.var = updates}
+select
+  u.id as user_id
+  , date(date_trunc('week', up.created_at)) as week
+  , datediff(week, dateadd(week, -8, ?training_date), date_trunc('week', up.created_at)) as week_number
+  , count(distinct up.id) as number_of_updates
+  , count(distinct date(up.created_at)) as number_of_days_with_updates
+  , count(distinct date_trunc('week', up.created_at)) as number_of_weeks_with_updates
+  , count(distinct case when up.client_type = 'Extension' then up.id else null end) as number_of_extension_updates
+  , count(distinct p.id) as number_of_profiles
+  , coalesce(count(distinct e.id), 0) as number_of_update_errors
+from dbt.users as u
+join dbt.profiles as p
+  on u.id = p.user_id
+join dbt.updates as up
+  on p.id = up.profile_id
+  -- only want updates created in Buffer (or do we?)
+  and up.was_sent_with_buffer
+  -- only want updates created in an 8-week time window
+  and up.created_at >= dateadd(week, -8, ?training_date)
+  and up.created_at <= ?training_date
+left join dbt.update_errors as e
+  on e.update_id = up.id
+where u.id in (?user_ids)
+group by 1, 2, 3
+```
+
+
+```{r}
+# replace integer64 with integers
+updates <- updates %>%
+  mutate_if(bit64::is.integer64, as.integer)
+```
+
+Great, now we'll need to widen the updates so that we have a column for each week's updates for each user.
+
+### Widening Updates
+We'll use the `tiyr` package's `spread()` function to do this.
+
+```{r}
+# spread updates 
+updates_wide <- updates %>% 
+  spread(key = week_number, value = number_of_updates, fill = 0) %>% 
+  select(-(week:number_of_extension_updates), -`-1`)
+
+# rename columns
+names(updates_wide)[4:11] <- c("week_0_updates", "week_1_updates", "week_2_updates", "week_3_updates",
+                               "week_4_updates", "week_5_updates", "week_6_updates", "week_7_updates")
+```
+
+Perfect!
