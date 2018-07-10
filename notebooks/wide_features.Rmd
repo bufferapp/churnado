@@ -13,6 +13,7 @@ library(buffer)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
+library(aws.s3)
 ```
 
 Next we set the training date, i.e. the date at which we want subscriptions to be active.
@@ -138,3 +139,11 @@ names(updates_wide)[4:11] <- c("week_0_updates", "week_1_updates", "week_2_updat
 ```
 
 Perfect!
+
+```{r}
+# save to s3
+s3write_using(updates_wide, FUN = write.csv,
+                    bucket = "buffer-data",
+                    object = "churnado_updates_wide.csv")
+```
+

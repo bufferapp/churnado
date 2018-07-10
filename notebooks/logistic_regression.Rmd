@@ -3,8 +3,7 @@ title: "Logistic Regression Models"
 output: github_document
 ---
 
-The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 55% of all the true at-risk subscriptions, with a true positive rate around 68% higher than the overall population rate. The AUC calculated on the testing set is **0.68**.
-
+The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 90% higher than the overall population rate. The AUC calculated on the testing set is **0.72**.
 
 The first thing we'll need to do is gather the data from the `data` directory.
 
@@ -18,14 +17,20 @@ library(ROCR)
 
 ```{r}
 # read data from csv
-subs <- read.csv('data/features.csv', header = T)
+subs <- read.csv('~/Documents/GitHub/churnado/data/features.csv', header = T)
 ```
 
 Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. First, let's simplify by removing subscriptions billed annually.
 
-```{r}
+```{r warning = FALSE, message = FALSE}
 # remove yearly subscriptions 
-subs <- filter(subs, billing_interval == 'month')
+subs <- filter(subs, billing_interval == 'month' & simplified_plan_name != 'reply' &
+                 !is.na(simplified_plan_name) & simplified_plan_name != '')
+
+# set dates
+subs$created_at <- as.Date(subs$created_at, format = '%Y-%m-%d')
+subs$canceled_at <- as.Date(subs$canceled_at, format = '%Y-%m-%d')
+subs$signup_date <- as.Date(subs$signup_date, format = '%Y-%m-%d')
 ```
 
 ## Exploratory Analysis
@@ -103,14 +108,6 @@ subs %>%
 ```
 
 This is useful to see. A higher percentage of users that _didn't_ churn created updates in all 8 weeks. A higher percentage of users that did churn didn't create updates in any of the weeks. It should be useful to include this feature in the final model. It may even make sense to use it as a _categorical_ variable. We'll also add a boolean variable `no_updates` that indicates whether the user didn't have any updates in the time period.
-
-```{r}
-# set weeks with updates as categorical
-subs <- subs %>% 
-  mutate(weeks_with_updates = as.factor(weeks_with_updates),
-         no_updates = total_updates == 0)
-```
-
 
 Let's shift and have a look at profiles.
 
@@ -214,23 +211,17 @@ ggplot(subs, aes(x = days_since_last_update, color = did_churn)) +
   labs(x = NULL, y = NULL, title = "Days Since Last Update", color = "Churned") 
 ```
 
-This is good. We might also create a categorical variable that indicates whether the user created an update in the most recent 4 days. 
-
-```{r}
-# create new variable
-subs <- subs %>% 
-  mutate(update_past_four_days = days_since_last_update <= 4)
-```
+This is good. We might also create a categorical variable that indicates whether the user created an update in the most recent 7 days. 
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
 subs %>% 
-  count(update_past_four_days, did_churn) %>% 
+  count(updates_past_week, did_churn) %>% 
   mutate(percent = n / sum(n)) %>% 
   filter(did_churn) %>% 
-  ggplot(aes(x = update_past_four_days, y = percent, fill = update_past_four_days)) +
+  ggplot(aes(x = updates_past_week, y = percent, fill = updates_past_week)) +
   geom_bar(stat = 'identity') +
   scale_y_continuous(labels = percent) +
-  labs(x = "Had Update in Last Four Days", y = NULL, title = "Percent of Users that Churned") +
+  labs(x = "Had Update in Last Week", y = NULL, title = "Percent of Users that Churned") +
   theme(legend.position = "none")
 ```
 
@@ -251,12 +242,6 @@ ggplot(subs, aes(x = number_of_team_members, color = did_churn)) +
 
 This isn't helpful. Let's created a categorical variable that indicates whether or not a user has a team member.
 
-```{r}
-# create categorical team member variable
-subs <- subs %>% 
-  mutate(has_team_member = number_of_team_members >= 1)
-```
-
 Now let's take a look at the numebr of charges that subscriptions had.
 
 ### Failed Charges
@@ -274,13 +259,6 @@ ggplot(subs, aes(x = number_of_failed_charges, color = did_churn)) +
 ```
 
 This isn't helpful. Let's create a categorical variable that tells us if the customer had any failed charges. We'll do the same for refunded charges.
-
-```{r}
-# create new feature
-subs <- subs %>% 
-  mutate(has_failed_charge = number_of_failed_charges >= 1,
-         has_refunded_charge = number_of_refunded_charges >= 1)
-```
 
 ```{r warning = FALSE, message = FALSE, echo = FALSE}
 subs %>% 
@@ -314,10 +292,14 @@ Wait, what? It seems that if a customer had a refunded charge they may be _less_
 Now let's split our data into training and testing sets.
 
 ```{r}
+# get user age at time subscription started
+subs <- subs %>% 
+  mutate(user_age = as.numeric(created_at - signup_date))
+
 # change values of did_churn
 subs <- subs %>% 
-  filter(simplified_plan_name != 'reply') %>% 
-  mutate(did_churn = ifelse(did_churn, 1, 0))
+  mutate(did_churn = ifelse(did_churn, 1, 0),
+         is_idle = as.factor(is_idle))
 
 # set seed for reproducible results
 set.seed(2356)
@@ -338,9 +320,10 @@ First we'll need to decide which features to include in our model.
 ```{r}
 # list features
 features <- c('has_team_member', 'is_mobile_user', 'number_of_profiles', 'has_refunded_charge',
-              'has_failed_charge', 'update_past_four_days', 'estimate', 'weeks_with_updates',
+              'has_failed_charge', 'updates_past_week', 'estimate', 'weeks_with_updates',
               'estimate', 'total_updates', 'simplified_plan_name', 'scale(subscription_age)',
-              'no_updates')
+              'is_idle', 'signup_client_name', 'has_billing_actions', 'has_analytics_actions',
+              'user_age')
 
 # collapse list to string
 feature_string <- paste(features, collapse = ' + ')
@@ -367,9 +350,10 @@ We have a lot of significant factors here. It looks like the number of profiles 
 
 ```{r}
 # list features
-features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'total_updates',
-              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates', 'scale(estimate)',
-              'simplified_plan_name', 'scale(subscription_age)')
+features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge',
+              'has_failed_charge', 'updates_past_week', 'estimate', 'weeks_with_updates',
+              'estimate', 'simplified_plan_name', 'scale(subscription_age)',
+              'is_idle', 'has_billing_actions', 'has_analytics_actions')
 
 # collapse list to string
 feature_string <- paste(features, collapse = ' + ')
@@ -384,13 +368,14 @@ logreg2 <- glm(formula = formula2, data = training, family = binomial(link = "lo
 summary(logreg2)
 ```
 
-Ok, let's remove total updates and the growth coefficient from our final model.
+Ok, let's remove `is_idle` from the model final model.
 
 ```{r}
 # list features
 features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 
-              'has_failed_charge', 'update_past_four_days', 'weeks_with_updates',
-              'simplified_plan_name', 'subscription_age')
+              'has_failed_charge', 'updates_past_week', 'weeks_with_updates',
+              'estimate', 'simplified_plan_name', 'subscription_age',
+              'has_billing_actions', 'has_analytics_actions')
 
 # collapse list to string
 feature_string <- paste(features, collapse = ' + ')
@@ -409,8 +394,8 @@ Time to make some predictions. The additional parameter `type = "response"` tell
 
 ```{r}
 # make predictions
-training$pred <- predict(logreg3, newdata = training, type = "response")
-testing$pred <- predict(logreg3, newdata = testing, type = "response")
+training$pred <- predict(logreg2, newdata = training, type = "response")
+testing$pred <- predict(logreg2, newdata = testing, type = "response")
 ```
 
 Let's plot the predictions for users that churned and users that didn't.
@@ -443,7 +428,7 @@ Let's build a confusion matrix using 15% as the threshold.
 
 ```{r}
 # build confusion matrix
-confuse <-  table(pred = testing$pred > 0.15, churned = testing$did_churn)
+confuse <-  table(pred = testing$pred >= 0.15, churned = testing$did_churn)
 confuse
 ```
 
@@ -471,7 +456,7 @@ enrich <- precision / mean(as.numeric(testing$did_churn))
 enrich
 ```
 
-Our logistic regression model identifies a set of potential at-risk subscriptions that finds about 55% of all the true at-risk subscriptions, with a true positive rate around 68% higher than the overall population rate.
+Our logistic regression model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 91% higher than the overall population rate.
 
 ### AUC
 Let's calculate AUC to evaluate our model's performance.

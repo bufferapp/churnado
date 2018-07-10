@@ -62,7 +62,7 @@ We'll grab the data we need for the analysis from [this Look](https://looker.buf
 churn_df <- read.csv('~/Downloads/churn_features.csv', header = T)
 ```
 
-We have around 78 thousand subscriptions in our dataset. Let's clean up the data a bit and get it ready for analysis.
+We have around 75 thousand subscriptions in our dataset. Let's clean up the data a bit and get it ready for analysis.
 
 ```{r eval = FALSE}
 # remove first column 
@@ -101,11 +101,11 @@ Great. Now we want to add a variable that indicates whether the subscription chu
 churn_df <- churn_df %>% 
   mutate(did_churn = !is.na(canceled_at) & canceled_at <= '2018-03-01',
          was_active_end_of_year = is.na(canceled_at) | canceled_at >= '2018-01-01',
-         was_active_two_months = signup_date <= '2017-10-31') %>% 
+         was_active_two_months = created_at <= '2017-10-31') %>% 
   filter(was_active_end_of_year & was_active_two_months)
 ```
 
-Alright, we're down to around 74 thousand subscriptions in our dataset. Now, let's gather data on the number of updates these users sent. We only want updates sent by users in our `churn_df` dataframe.
+Alright, we're down to around 66 thousand subscriptions in our dataset. Now, let's gather data on the number of updates these users sent. We only want updates sent by users in our `churn_df` dataframe.
 
 ```{r}
 # get user ids
@@ -292,6 +292,74 @@ churn_df <- churn_df %>%
 # determine if user is a mobile user
 churn_df <- churn_df %>% 
   mutate(is_mobile_user = ios_user == "Yes" | android_user == "Yes")
+
+# determine if user is idle
+churn_df <- churn_df %>% 
+  mutate(is_idle = as.factor(is.na(days_since_last_update) | days_since_last_update > 90),
+         updates_past_week = as.factor(!is.na(days_since_last_update) & days_since_last_update < 7))
+
+# fix profile numbers
+churn_df$number_of_profiles <- as.numeric(gsub(",", "", churn_df$number_of_profiles))
+
+# create categorical team member variable
+churn_df <- churn_df %>% 
+  mutate(has_team_member = as.factor(number_of_team_members >= 1),
+         has_failed_charge = as.factor(number_of_failed_charges >= 1),
+         has_refunded_charge = as.factor(number_of_refunded_charges >= 1))
+```
+
+Next, we may want to add some data around billing actions and helpscout requests.
+
+### Billing Actions
+
+```{r eval = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql eval = FALSE}
+select
+  a.user_id
+  , count(distinct case when full_scope like 'dashboard settings billing%' then id else null end) as billing_actions
+  , count(distinct case when full_scope like 'dashboard analytics%' then id else null end) as analytics_actions
+  , count(distinct case when full_scope like 'dashboard settings billing%' then date_trunc('week', a.created_at) else null end) as number_of_weeks_with_actions
+from dbt.actions_taken as a
+where a.user_id in (?user_ids)
+and a.created_at between dateadd(week, -8, '2017-12-31') and '2017-12-31'
+group by 1
+```
+
+```{r eval = FALSE}
+# fix integers
+billing_actions$billing_actions <- as.integer(billing_actions$billing_actions)
+billing_actions$analytics_actions <- as.integer(billing_actions$analytics_actions)
+billing_actions$number_of_weeks_with_actions <- as.integer(billing_actions$number_of_weeks_with_actions)
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(billing_actions, file = 'churnado_billing_actions.rds')
+
+# load data
+billing_actions <- readRDS('churnado_billing_actions.rds')
+```
+
+Now let's join it to our `churn_df` dataframe.
+
+```{r}
+# join billing actions
+churn_df <- churn_df %>% 
+  left_join(billing_actions, by = c('id' = 'user_id'))
+
+# fill NAs with 0
+churn_df$billing_actions[is.na(churn_df$billing_actions)] <- 0
+churn_df$analytics_actions[is.na(churn_df$analytics_actions)] <- 0
+churn_df$number_of_weeks_with_actions[is.na(churn_df$number_of_weeks_with_actions)] <- 0
+
+# create dummy variables
+churn_df <- churn_df %>% 
+  mutate(has_billing_actions = as.factor(billing_actions > 0),
+         has_analytics_actions = as.factor(analytics_actions > 0))
 ```
 
 Now, let's save this dataframe and do a bit of exploratory analysis. 
