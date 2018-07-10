@@ -31,6 +31,6 @@ clean-targets:         # directories to be removed by `dbt clean`
 # as views (the default). Try changing `view` to `table` below, then re-running dbt
 models:
   churnado:
-    materialized: view
+    materialized: table
     vars:
-      t: "2018-01-01"
+      t: "2018-04-01"
