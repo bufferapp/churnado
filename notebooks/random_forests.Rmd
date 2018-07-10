@@ -18,7 +18,7 @@ library(ROCR)
 
 ```{r}
 # read data from csv
-subs <- read.csv('~/data/features.csv', header = T)
+subs <- read.csv('~/Documents/GitHub/churnado/data/features.csv', header = T)
 ```
 
 Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. First, let's simplify by removing subscriptions billed annually.
@@ -49,22 +49,23 @@ The random forest approach tries to de-correlate trees by randomizing the set of
  
 The final ensemble of trees is then bagged to make the predictions. Let's build our first RF model. We'll need to define a few new features quickly.
 
-```{r}
-# define new features
-subs <- subs %>% 
-  mutate(has_team_member = !is.na(number_of_team_members) & number_of_team_members > 0,
-         has_refunded_charge = !is.na(number_of_refunded_charges) & number_of_refunded_charges > 0,
-         has_failed_charge = !is.na(number_of_failed_charges) & number_of_failed_charges > 0,
-         did_churn = as.factor(did_churn))
-```
-
-
 ```{r warning = FALSE, message = FALSE}
 # set seed for reproducibility
 set.seed(4399)
 
 # set random groups
 subs$rgroup <- runif(dim(subs)[[1]])
+
+# set factors
+subs$did_churn <- as.factor(subs$did_churn)
+subs$is_mobile_user <- as.factor(subs$is_mobile_user)
+subs$has_team_member <- as.factor(subs$has_team_member)
+subs$has_failed_charge <- as.factor(subs$has_failed_charge)
+subs$has_refunded_charge <- as.factor(subs$has_refunded_charge)
+subs$has_billing_actions <- as.factor(subs$has_billing_actions)
+subs$has_analytics_actions <- as.factor(subs$has_analytics_actions)
+subs$updates_past_week <- as.factor(subs$updates_past_week)
+subs$is_idle <- as.factor(subs$is_idle)
 
 # split out training and testing sets
 training <- subset(subs, rgroup <= 0.8)
@@ -73,10 +74,8 @@ testing <- subset(subs, rgroup > 0.8)
 # list features
 features <- c('has_team_member', 'is_mobile_user', 'number_of_profiles', 'has_refunded_charge',
               'has_failed_charge', 'days_since_last_update', 'estimate', 'weeks_with_updates',
-              'estimate', 'total_updates', 'simplified_plan_name', 'subscription_age',
-              'number_of_twitter_profiles', 'number_of_facebook_personal_profiles',
-              'number_of_facebook_pages', 'number_of_facebook_groups', 'number_of_instagram_personal_profiles',
-              'number_of_instagram_business_profiles')
+              'total_updates', 'simplified_plan_name', 'subscription_age', 'is_idle',
+              'updates_past_week', 'has_billing_actions', 'has_analytics_actions')
 
 # remove NAs
 training <- training %>% 
@@ -109,11 +108,11 @@ ggplot(testing, aes(x = predictions, color = did_churn, linetype = did_churn)) +
   guides(linetype = FALSE)
 ```
 
-Hmm. It looks like a lot of subscriptions that did in fact churn have a low predicted probability of churning. Alright, let's look at the confusion matrix and calculate AUC with a threshold set around 30%.
+Hmm. It looks like a lot of subscriptions that did in fact churn have a low predicted probability of churning. Alright, let's look at the confusion matrix and calculate AUC with a threshold set around 20%.
 
 ```{r}
 # build confusion matrix
-confuse <-  table(pred = testing$predictions >= 0.30, churned = testing$did_churn)
+confuse <-  table(pred = testing$predictions >= 0.20, churned = testing$did_churn)
 confuse
 ```
 
@@ -176,9 +175,9 @@ Wow, for some reason the number of profiles seems to be one of the most importan
 
 ```{r}
 # list features
-features <- c('has_team_member', 'is_mobile_user', 'number_of_profiles', 'has_refunded_charge',
-              'has_failed_charge', 'days_since_last_update', 'estimate', 'weeks_with_updates',
-              'estimate', 'total_updates', 'simplified_plan_name', 'subscription_age')
+features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'has_billing_actions',
+              'has_failed_charge', 'updates_past_week', 'estimate', 'weeks_with_updates',
+              'total_updates', 'simplified_plan_name', 'subscription_age')
 
 # remove NAs
 training <- training %>% 

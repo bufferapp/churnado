@@ -369,6 +369,313 @@ Now, let's save this dataframe and do a bit of exploratory analysis.
 write.csv(churn_df, file = "~/Desktop/features.csv", row.names = FALSE)
 ```
 
+### Validation Set
+Let's repeat these steps to get a validation set. These subscriptions were active on April 1, 2018. We'll use [this Look](https://looker.buffer.com/looks/4497).
+
+```{r eval = FALSE}
+# read data from CSV
+validation <- read.csv('~/Downloads/validation_set.csv', header = T)
+```
+
+We have around 75 thousand subscriptions in our dataset. Let's clean up the data a bit and get it ready for analysis.
+
+```{r eval = FALSE}
+# remove first column 
+validation$X <- NULL
+
+# rename columns
+colnames(validation) <- safe_names(colnames(validation))
+
+# rename columns with dplyr
+validation <- validation %>% 
+  rename(ios_user = is_ios_user_yes_no_,
+         android_user = is_android_user_yes_no_,
+         quantity = number_of_subscription_seats,
+         signup_date = created_at_date,
+         created_at = created_at_date_1,
+         canceled_at = canceled_at_date)
+
+# set dates as date objects
+validation$signup_date <- as.Date(validation$signup_date, "%Y-%m-%d")
+validation$created_at <- as.Date(validation$created_at, "%Y-%m-%d")
+validation$canceled_at <- as.Date(validation$canceled_at, "%Y-%m-%d")
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(validation, file = 'churnado_validation.rds')
+
+# load data
+validation <- readRDS('churnado_validation.rds')
+```
+
+```{r warning = FALSE, message = FALSE}
+# indicate if subscription churned
+validation <- validation %>% 
+  mutate(did_churn = !is.na(canceled_at) & canceled_at <= '2018-06-01',
+         was_active_end_of_year = is.na(canceled_at) | canceled_at >= '2018-04-01',
+         was_active_two_months = created_at <= '2018-01-31') %>% 
+  filter(was_active_end_of_year & was_active_two_months)
+```
+
+Alright, we're down to around 66 thousand subscriptions in our dataset. Now, let's gather data on the number of updates these users sent. We only want updates sent by users in our `validation` dataframe.
+
+```{r}
+# get user ids
+user_ids <- paste(shQuote(validation$id), collapse = ',')
+
+# remove double quotes
+user_ids <- as.factor(noquote(user_ids))
+```
+
+```{r eval = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql connection = con, output.var = val_updates}
+select
+  user_id
+  , date(date_trunc('week', created_at)) as week
+  , count(distinct id) as updates
+from dbt.updates
+where user_id in (?user_ids)
+and was_sent_with_buffer
+and created_at >= '2018-01-15' and created_at <= '2018-04-01'
+group by 1, 2
+```
+
+Sweet, that actually worked! Now let's get the number of days that had passed between the the users' last updates and December 31, 2017.
+
+```{sql connection = con, output.var = val_last_update}
+with last_update_date as (
+  select
+    user_id
+    , max(created_at) as last_update_date
+  from dbt.updates
+  where user_id in (?user_ids)
+  and was_sent_with_buffer
+  and created_at <= date('2018-04-01')
+  group by 1
+)
+select
+  user_id
+  , datediff(days, last_update_date, date('2018-04-01')) as days_since_last_update
+from last_update_date
+```
+
+```{r eval = FALSE}
+# set count as integer
+val_last_update <- val_last_update %>% 
+  mutate(days_since_last_update = as.integer(days_since_last_update))
+```
+
+```{r eval = FALSE}
+# complete the data frame
+val_updates <- val_updates %>%
+  mutate(updates = as.numeric(updates)) %>% 
+  filter(week != max(week) & week != min(week)) %>%
+  complete(user_id, week, fill = list(updates = 0))
+```
+
+```{r include = FALSE}
+# save data
+#saveRDS(val_updates, file = 'churnado_validation_updates.rds')
+#saveRDS(val_last_update, file = 'churnado_val_last_update.rds')
+
+# load data
+val_updates <- readRDS('churnado_validation_updates.rds')
+val_last_update <- readRDS('churnado_val_last_update.rds')
+```
+
+```{r warning = FALSE, message = FALSE}
+# join last update date
+validation <- validation %>% 
+  left_join(val_last_update, by = c('id' = 'user_id'))
+
+# remove last update dataframe
+rm(val_last_update)
+```
+
+Now let's fit linear models to the users' update counts so that we can get growth coefficients for each.
+
+```{r message = FALSE, warning = FALSE}
+# get the year
+val_by_user <- val_updates %>% 
+  group_by(week, user_id) %>% 
+  summarise(updates = sum(updates, na.rm = TRUE)) %>% 
+  mutate(year = year(week) + yday(week) / 365) %>% 
+  ungroup()
+
+# create logistic regression model
+mod <- ~ lm(updates ~ year, .)
+
+# calculate growth rates for each user (this might take a while)
+slopes <- val_by_user %>%
+  nest(-user_id) %>%
+  mutate(model = map(data, mod)) %>%
+  unnest(map(model, tidy)) %>%
+  filter(term == "year") %>%
+  arrange(desc(estimate))
+```
+
+Let's plot users' updates and order them by their growth coefficients.
+
+```{r echo = FALSE}
+slopes %>%
+  head(15) %>%
+  inner_join(val_by_user, by = "user_id") %>%
+  mutate(user_id = reorder(user_id, -estimate)) %>%
+  ggplot(aes(x = week, y = updates, color = user_id)) +
+  geom_line(show.legend = FALSE) +
+  facet_wrap(~ user_id, scales = "free_y", ncol = 3) +
+  labs(x = NULL, y = NULL)
+```
+
+Cool! These users' update counts have all increased. Now let's look at the users with the lowest growth coefficients.
+
+```{r echo = FALSE}
+slopes %>%
+  arrange(estimate) %>% 
+  head(15) %>%
+  inner_join(val_by_user, by = "user_id") %>%
+  mutate(user_id = reorder(user_id, -estimate)) %>%
+  ggplot(aes(x = week, y = updates, color = user_id)) +
+  geom_line(show.legend = FALSE) +
+  facet_wrap(~ user_id, scales = "free_y", ncol = 3) +
+  labs(x = NULL, y = NULL)
+```
+
+This is what we were expecting to see. Now let's calculate summary stats for users' update counts and join in the slopes.
+
+```{r}
+# aggregate users update counts
+val_by_user <- val_updates %>% 
+  group_by(user_id) %>% 
+  summarise(weeks_with_updates = length(updates[updates > 0]),
+            total_updates = sum(updates),
+            updates_per_week = sum(updates) / n_distinct(week)) %>% 
+  inner_join(select(slopes, user_id, estimate), by = "user_id")
+```
+
+Great! We seem to be missing update data for around 10 thousand users. Let's quickly check on a couple of those.
+
+```{r warning = FALSE, message = FALSE}
+validation %>% 
+  anti_join(val_by_user, by = c('id' = 'user_id')) %>% 
+  select(id) %>% 
+  head()
+```
+
+Indeed, these users have no updates during the selected time period. Let's join this data into our original dataframe. 
+
+```{r warning = FALSE, message = FALSE}
+# join in updates data
+validation <- validation %>% 
+  left_join(val_by_user, by = c('id' = 'user_id'))
+```
+
+Now let's replace NAs with 0s
+
+```{r}
+# replace NAs with 0s
+validation$weeks_with_updates[is.na(validation$weeks_with_updates)] <- 0
+validation$total_updates[is.na(validation$total_updates)] <- 0
+validation$updates_per_week[is.na(validation$updates_per_week)] <- 0
+validation$estimate[is.na(validation$estimate)] <- 0
+validation$number_of_team_members[is.na(validation$number_of_team_members)] <- 0
+
+# remove unneeded data frames
+rm(val_by_user)
+rm(slopes)
+rm(val_updates)
+```
+
+Sweet. Now we can generate a couple more features. First we want to know the subscrpition age at the time of measurement (December 31, 2017). Remember, we're trying to predict the subscriptions that churn within two months of this date.
+
+```{r}
+# get subscription age
+validation <- validation %>% 
+  mutate(subscription_age = as.numeric(as.Date('2017-12-31') - created_at))
+
+# determine if user is a mobile user
+validation <- validation %>% 
+  mutate(is_mobile_user = ios_user == "Yes" | android_user == "Yes")
+
+# determine if user is idle
+validation <- validation %>% 
+  mutate(is_idle = as.factor(is.na(days_since_last_update) | days_since_last_update > 90),
+         updates_past_week = as.factor(!is.na(days_since_last_update) & days_since_last_update < 7))
+
+# fix profile numbers
+validation$number_of_profiles <- as.numeric(gsub(",", "", validation$number_of_profiles))
+
+# create categorical team member variable
+validation <- validation %>% 
+  mutate(has_team_member = as.factor(number_of_team_members >= 1),
+         has_failed_charge = as.factor(number_of_failed_charges >= 1),
+         has_refunded_charge = as.factor(number_of_refunded_charges >= 1))
+```
+
+Now to get the billing actions.
+
+```{r eval = FALSE}
+# connect to redshift
+con <- redshift_connect()
+```
+
+```{sql connection = con, output.var = val_billing_actions}
+select
+  a.user_id
+  , count(distinct case when full_scope like 'dashboard settings billing%' then id else null end) as billing_actions
+  , count(distinct case when full_scope like 'dashboard analytics%' then id else null end) as analytics_actions
+  , count(distinct case when full_scope like 'dashboard settings billing%' then date_trunc('week', a.created_at) else null end) as number_of_weeks_with_actions
+from dbt.actions_taken as a
+where a.user_id in (?user_ids)
+and a.created_at between dateadd(week, -8, '2018-04-01') and '2018-04-01'
+group by 1
+```
+
+```{r eval = FALSE}
+# fix integers
+val_billing_actions$val_billing_actions <- as.integer(val_billing_actions$billing_actions)
+val_billing_actions$analytics_actions <- as.integer(val_billing_actions$analytics_actions)
+val_billing_actions$number_of_weeks_with_actions <- as.integer(val_billing_actions$number_of_weeks_with_actions)
+```
+
+```{r include = FALSE}
+# save data
+# saveRDS(val_billing_actions, file = 'churnado_val_billing_actions.rds')
+
+# load data
+val_billing_actions <- readRDS('churnado_val_billing_actions.rds')
+```
+
+Now let's join it to our `churn_df` dataframe.
+
+```{r}
+# join billing actions
+validation <- validation %>% 
+  left_join(val_billing_actions, by = c('id' = 'user_id'))
+
+# fill NAs with 0
+validation$billing_actions[is.na(validation$billing_actions)] <- 0
+validation$analytics_actions[is.na(validation$analytics_actions)] <- 0
+validation$number_of_weeks_with_actions[is.na(validation$number_of_weeks_with_actions)] <- 0
+
+# create dummy variables
+validation <- validation %>% 
+  mutate(has_billing_actions = as.factor(billing_actions > 0),
+         has_analytics_actions = as.factor(analytics_actions > 0))
+```
+
+Finally let's save the dataset.
+
+```{r eval = FALSE}
+# write data as csv
+write.csv(validation, file = "~/Desktop/validation.csv", row.names = FALSE)
+```
+
 
 ## Exploratory Analysis
 First off, let's see the proportion of users that churned in our time frame.

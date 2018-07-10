@@ -5,7 +5,7 @@ output: github_document
 
 The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 90% higher than the overall population rate. This is calculated by finding the _enrichment rate_, the ratio of the classifier precision to the average rate of positives.
 
-The AUC calculated on the testing set is **0.72**.
+The AUC calculated on the testing set is **0.72**. The AUC calculated on the validation set is **0.68**.
 
 The first thing we'll need to do is gather the data from the `data` directory.
 
@@ -479,4 +479,112 @@ calcAUC <- function(predcol, outcol) {
 calcAUC(testing[, "pred"], testing[, "did_churn"])
 ```
 
-Hey, that's not the worst result ever! 
+Hey, that's not the worst result ever! Let's check on the validation set.
+
+### Validation
+
+```{r}
+# read data from csv
+val <- read.csv('~/Documents/GitHub/churnado/data/validation.csv', header = T)
+```
+
+Great, we have 74 thousand subscriptions to work with. To evaluate our models, we'll need to split our data into a training and testing set. First, let's simplify by removing subscriptions billed annually.
+
+```{r warning = FALSE, message = FALSE}
+# remove yearly subscriptions 
+val <- filter(val, billing_interval == 'month' &
+                       simplified_plan_name != 'reply' &
+                       !is.na(simplified_plan_name) &
+                       simplified_plan_name != '')
+
+# set dates
+val$created_at <- as.Date(val$created_at, format = '%Y-%m-%d')
+val$canceled_at <- as.Date(val$canceled_at, format = '%Y-%m-%d')
+val$signup_date <- as.Date(val$signup_date, format = '%Y-%m-%d')
+
+# get user age at time subscription started
+val <- val %>% 
+  mutate(user_age = as.numeric(created_at - signup_date))
+
+# change values of did_churn
+val <- val %>% 
+  mutate(did_churn = ifelse(did_churn, 1, 0),
+         is_idle = as.factor(is_idle))
+```
+
+Now let's test our model on the validation set.
+
+```{r}
+# make predictions on validation set
+val$pred <- predict(logreg2, newdata = val, type = "response")
+```
+
+Let's plot the predictions for users that churned and users that didn't.
+
+```{r echo = FALSE, warning = FALSE, message = FALSE}
+ggplot(val, aes(x = pred, color = as.factor(did_churn), linetype = as.factor(did_churn))) +
+  geom_density() + 
+  scale_x_continuous(labels = percent) +
+  labs(x = "Prediction", y = NULL, title = "Predicted Probability of Churning",
+       color = "Churned") +
+  guides(linetype = FALSE)
+```
+
+Doesn't look the best. In order to use the model as a classifier, we must pick a threshold; scores above the threshold will be classified as positive, those below as negative. Here we can choose something like 15% or 20%. 
+
+The higher we set the threshold, the more precise the classifier will be (we’ll iden- tify a set of situations with a much higher-than-average rate of at-risk births); but we’ll also miss a higher percentage of at-risk situations, as well.
+
+Let's build a confusion matrix using 15% as the threshold.
+
+```{r}
+# build confusion matrix
+confuse <-  table(pred = val$pred >= 0.15, churned = val$did_churn)
+confuse
+```
+
+Now we can calculate precision, recall, and enrichment. Precision is defined as the number of true positives divided by the number of true positives plus the number of false positives. False positives are cases the model incorrectly labels as positive that are actually negative, or in our example, individuals the model classifies as terrorists that are not. While recall expresses the ability to find all relevant instances in a dataset, precision expresses the proportion of the data points our model says was relevant actually were relevant. 
+
+```{r}
+# calculate precision
+precision <- confuse[2,2] / sum(confuse[2,])
+precision
+```
+
+Seems like we have a lot of false positives, but that might be alright. Recall is the number of true positives divided by the number of true positives plus the number of false negatives.
+
+```{r}
+# calculate recall
+recall <- confuse[2,2] / sum(confuse[,2])
+recall
+```
+
+The ratio of the classifier precision to the average rate of positives is called the enrichment rate.
+
+```{r}
+# calculate enrichment rate
+enrich <- precision / mean(as.numeric(testing$did_churn))
+enrich
+```
+
+Our logistic regression model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 91% higher than the overall population rate.
+
+### AUC
+Let's calculate AUC to evaluate our model's performance.
+
+```{r}
+# define what a positive result is
+pos <- 1
+
+# function to calculate AUC
+calcAUC <- function(predcol, outcol) {
+  
+  perf <- performance(prediction(predcol, outcol == pos), 'auc') 
+  as.numeric(perf@y.values)
+  
+}
+
+# calculate AUC
+calcAUC(val[, "pred"], val[, "did_churn"])
+```
+
+That's better than random guessing!
