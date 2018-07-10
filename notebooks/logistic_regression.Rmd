@@ -3,7 +3,9 @@ title: "Logistic Regression Models"
 output: github_document
 ---
 
-The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 90% higher than the overall population rate. The AUC calculated on the testing set is **0.72**.
+The purpose of this notebook is to explore logistic regression models to establish a baseline model performance and determine which features correlate best with the likelihood of churning. The final model identifies a set of potential at-risk subscriptions that finds about 56% of all the true at-risk subscriptions, with a true positive rate around 90% higher than the overall population rate. This is calculated by finding the _enrichment rate_, the ratio of the classifier precision to the average rate of positives.
+
+The AUC calculated on the testing set is **0.72**.
 
 The first thing we'll need to do is gather the data from the `data` directory.
 
