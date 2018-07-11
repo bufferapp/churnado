@@ -42,7 +42,7 @@ The `did_churn` variable indicates whether or not the subscription was canceled 
 The final dataset is exported as a csv to the `data` directory. 
 
 ```{r setup, include = F, warning = FALSE, message = FALSE}
-# Load libraries
+# load libraries
 library(buffer)
 library(dplyr)
 library(ggplot2)
@@ -58,7 +58,7 @@ library(purrr)
 We'll grab the data we need for the analysis from [this Look](https://looker.buffer.com/looks/4497). The SQL query takes to long to run for it to be used within this notebook. We'll read in the data from a CSV. All of the subscriptions were created in the year 2017.
 
 ```{r eval = FALSE}
-# read data from CSV
+# read data from csv
 churn_df <- read.csv('~/Downloads/churn_features.csv', header = T)
 ```
 
