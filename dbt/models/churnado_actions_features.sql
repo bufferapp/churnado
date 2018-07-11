@@ -1,3 +1,10 @@
+{{
+  config({
+    "sort": "user_id",
+    "dist": "user_id",
+  })
+}}
+
 select
   a.user_id
   , count(distinct case when full_scope like 'dashboard settings billing%' then id else null end) as billing_actions

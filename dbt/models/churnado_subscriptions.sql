@@ -1,3 +1,10 @@
+{{
+  config({
+    "sort": "user_id",
+    "dist": "user_id",
+  })
+}}
+
 select
   s.id as subscription_id
   , s.customer_id
