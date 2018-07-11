@@ -1,3 +1,10 @@
+{{
+  config({
+    "sort": "user_id",
+    "dist": "user_id",
+  })
+}}
+
 select
   u.id as user_id
   , u.created_at as user_signup_date
