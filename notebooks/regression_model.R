@@ -51,9 +51,9 @@ build_model <- function(df) {
   print("Building model.")
   
   # list features
-  features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 
-                'has_failed_charge', 'updates_last_week', 'weeks_with_updates',
-                'simplified_plan_id', 'subscription_age', 'has_billing_actions', 'has_analytics_actions')
+  features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 'successful_charges',
+                'has_failed_charge', 'updates_last_week', 'total_updates', 'weeks_with_updates',
+                'user_age', 'has_billing_actions', 'number_of_weeks_with_actions', 'days_since_last_update')
   
   # collapse list to string
   feature_string <- paste(features, collapse = ' + ')
@@ -80,12 +80,12 @@ make_predictions <- function(model, new_data) {
   # isolate subscription id and prediction
   predictions <- new_data %>% 
     select(subscription_id, churn_probability) %>% 
-    mutate(created_at <- Sys.time(),
+    mutate(created_at = Sys.time(),
+           churn_probability = round(churn_probability, 2),
            model_name = 'logistic_regression',
            model_version = '0.1',
            id = paste0(as.character(subscription_id), as.character(churn_probability),
-                       as.character(created_at), model_name, model_version)) %>% 
-    mutate(id = digest(id, algo = "md5", serialize = FALSE))
+                       as.character(created_at), model_name, model_version))
   
   # return new data with predictions
   predictions
@@ -110,7 +110,7 @@ main <- function() {
   # write results to Redshift
   print("Writing to Redshift.")
   buffer::write_to_redshift(predictions, "churnado_predictions", "churnado-model-predictions",
-                            option = "update", keys = c("id"))
+                            option = "replace", keys = c("id"))
   print("Done.")
 }
 
