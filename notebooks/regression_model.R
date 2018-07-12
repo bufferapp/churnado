@@ -1,23 +1,22 @@
 # load libraries
 library(buffer)
 library(dplyr)
-library(ggplot2)
-library(hrbrthemes)
-library(scales)
 library(tidyr)
 library(lubridate)
-library(broom)
-library(purrr)
+
+
+# get helper functions
+source("~/Documents/GitHub/churnado/notebooks/churnado_features.R")
 
 # read data from csv
-get_data <- function() {
-  
-  print("Reading data.")
-  
-  df <- read.csv('~/Documents/GitHub/churnado/data/features.csv', header = T)
-  df
-  
-}
+#get_data <- function() {
+#  
+#  print("Reading data.")
+#  
+#  df <- read.csv('~/Documents/GitHub/churnado/data/features.csv', header = T)
+#  df
+#  
+#}
 
 
 # clean data
@@ -26,8 +25,7 @@ clean_data <- function(df) {
   print("Cleaning data.")
   
   # remove yearly dfcriptions 
-  df <- filter(df, billing_interval == 'month' & 
-                   (simplified_plan_name == 'awesome' | simplified_plan_name == 'business'))
+  df <- filter(df, simplified_plan_id == 'awesome' | simplified_plan_id == 'business')
   
   # set dates
   df$created_at <- as.Date(df$created_at, format = '%Y-%m-%d')
@@ -37,8 +35,10 @@ clean_data <- function(df) {
   # update variables
   df <- df %>% 
     mutate(user_age = as.numeric(created_at - signup_date),
-           did_churn = ifelse(did_churn, 1, 0),
-           is_idle = as.factor(is_idle))
+           subscription_age = as.numeric(as.Date('2017-12-31') - created_at),
+           has_refunded_charge = as.factor(refunded_charges > 0),
+           has_failed_charge = as.factor(failed_charges > 0),
+           did_churn = ifelse(did_churn, 1, 0))
   
   # return cleaned dataframe
   df
@@ -53,9 +53,8 @@ build_model <- function(df) {
   
   # list features
   features <- c('has_team_member', 'is_mobile_user', 'has_refunded_charge', 
-                'has_failed_charge', 'updates_past_week', 'weeks_with_updates',
-                'estimate', 'simplified_plan_name', 'subscription_age',
-                'has_billing_actions', 'has_analytics_actions')
+                'has_failed_charge', 'updates_last_week', 'weeks_with_updates',
+                'simplified_plan_id', 'subscription_age', 'has_billing_actions', 'has_analytics_actions')
   
   # collapse list to string
   feature_string <- paste(features, collapse = ' + ')
@@ -89,8 +88,11 @@ make_predictions <- function(model, new_data) {
 
 main <- function() {
   
+  # set training date
+  training_date <- '2017-12-31'
+  
   # get data and clean it
-  df <- get_data()
+  df <- get_data(training_date)
   df <- clean_data(df)
   
   # build model
