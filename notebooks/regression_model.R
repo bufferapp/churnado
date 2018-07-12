@@ -1,8 +1,7 @@
 # load libraries
 library(buffer)
 library(dplyr)
-library(tidyr)
-library(lubridate)
+library(digest)
 
 
 # get helper functions
@@ -76,13 +75,20 @@ make_predictions <- function(model, new_data) {
   print("Making predictions.")
   
   # make predictions
-  new_data$pred <- predict(model, newdata = new_data, type = "response")
+  new_data$churn_probability <- predict(model, newdata = new_data, type = "response")
   
-  # set the date
-  new_data$prediction_created_at <- Sys.time()
+  # isolate subscription id and prediction
+  predictions <- new_data %>% 
+    select(subscription_id, churn_probability) %>% 
+    mutate(created_at <- Sys.time(),
+           model_name = 'logistic_regression',
+           model_version = '0.1',
+           id = paste0(as.character(subscription_id), as.character(churn_probability),
+                       as.character(created_at), model_name, model_version)) %>% 
+    mutate(id = digest(id, algo = "md5", serialize = FALSE))
   
   # return new data with predictions
-  new_data
+  predictions
 }
 
 
@@ -103,8 +109,8 @@ main <- function() {
   
   # write results to Redshift
   print("Writing to Redshift.")
-  buffer::write_to_redshift(predictions, "churnado_predictions", "churnado-predictions",
-                            option = "replace", keys = c("subscription_id", "prediction_created_at"))
+  buffer::write_to_redshift(predictions, "churnado_predictions", "churnado-model-predictions",
+                            option = "update", keys = c("id"))
   print("Done.")
 }
 
