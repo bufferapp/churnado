@@ -85,7 +85,15 @@ make_predictions <- function(model, new_data) {
            model_name = 'logistic_regression',
            model_version = '0.1',
            id = paste0(as.character(subscription_id), as.character(churn_probability),
-                       as.character(created_at), model_name, model_version))
+                       as.character(created_at), model_name, model_version)) 
+  
+    
+  # vectorize digest function
+  vdigest <- Vectorize(digest)
+  
+  # create id
+  predictions <- predictions %>% 
+    mutate(id = vdigest(id))
   
   # return new data with predictions
   predictions
@@ -95,7 +103,7 @@ make_predictions <- function(model, new_data) {
 main <- function() {
   
   # set training date
-  training_date <- '2017-12-31'
+  training_date <- '2018-07-10'
   
   # get data and clean it
   df <- get_data(training_date)
