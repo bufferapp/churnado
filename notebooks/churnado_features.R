@@ -72,26 +72,19 @@ get_users <- function(user_ids) {
   # users query
   users_query <- "
   
-    with user_team_member_facts as (
-      select
-        owner_user_id as org_owner_user_id
-        , count(distinct case when team_member_user_id != owner_user_id then team_member_user_id else null end) as team_members
-      from dbt.org_team_members
-      group by 1
-    )
     select 
       u.id as user_id
       , u.billing_stripe_customer_id as customer_id
       , date(u.created_at) as signup_date
-      , case when ut.team_members is not null and ut.team_members >= 1 then True 
+      , case when ut.number_of_team_members is not null and ut.number_of_team_members >= 1 then True 
           else false
           end as has_team_member
       , case when uc.is_ios_user or uc.is_android_user then True else False end as is_mobile_user
     from dbt.users as u
-    left join user_team_member_facts as ut on ut.org_owner_user_id = u.id
-    left join looker_scratch.LR$MCC6J330P1RKDPL9M3KAH_user_client_facts as uc
+    left join dbt.user_team_member_facts as ut on ut.user_id = u.id
+    left join dbt.user_client_facts as uc
       on u.id = uc.user_id
-    where user_id in user_id_list
+    where u.id in user_id_list
     group by 1,2,3,4,5
     "
   
