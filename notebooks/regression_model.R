@@ -7,16 +7,6 @@ library(digest)
 # get helper functions
 source("~/Documents/GitHub/churnado/notebooks/churnado_features.R")
 
-# read data from csv
-#get_data <- function() {
-#  
-#  print("Reading data.")
-#  
-#  df <- read.csv('~/Documents/GitHub/churnado/data/features.csv', header = T)
-#  df
-#  
-#}
-
 
 # clean data
 clean_data <- function(df) {
@@ -95,7 +85,7 @@ make_predictions <- function(model, new_data) {
 main <- function() {
   
   # set training date
-  training_date <- '2017-12-31'
+  training_date <- '2018-06-01'
   
   # get data and clean it
   df <- get_data(training_date)
@@ -109,8 +99,11 @@ main <- function() {
   
   # write results to Redshift
   print("Writing to Redshift.")
-  buffer::write_to_redshift(predictions, "churnado_predictions", "churnado-model-predictions",
-                            option = "replace", keys = c("id"))
+  buffer::write_to_redshift(df = predictions, 
+                            table_name = "churnado_predictions", 
+                            bucket_name = "churnado-predictions",
+                            option = "upsert", 
+                            keys = c("id"))
   print("Done.")
 }
 
