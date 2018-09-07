@@ -91,6 +91,17 @@ main <- function() {
   df <- get_data(training_date)
   df <- clean_data(df)
   
+  # write features to redshift
+  churnado_features <- df %>% 
+    select(-did_churn) %>% 
+    mutate(features_created_at = Sys.time())
+  
+  buffer::write_to_redshift(df = churnado_features, 
+                            table_name = "churnado_features", 
+                            bucket_name = "churnado-features",
+                            option = "upsert", 
+                            keys = c("subscription_id"))
+  
   # build model
   mod <- build_model(df)
   
