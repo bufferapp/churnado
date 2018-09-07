@@ -3,7 +3,6 @@ library(buffer)
 library(dplyr)
 library(digest)
 
-
 # get helper functions
 source("~/Documents/GitHub/churnado/notebooks/churnado_features.R")
 
@@ -85,12 +84,26 @@ make_predictions <- function(model, new_data) {
 main <- function() {
   
   # set training date
-  training_date <- '2018-06-01'
+  training_date <- '2018-09-01'
   
   # get data and clean it
+  print("Collecting data")
   df <- get_data(training_date)
+  
+  print("Cleaning data")
   df <- clean_data(df)
   
+  # send to redshift
+  churnado_features <- df %>% 
+    select(-did_churn) %>% 
+    mutate(features_created_at = Sys.time())
+  
+  # write features to redshift
+  buffer::write_to_redshift(df = churnado_features, 
+                            table_name = "churnado_features", 
+                            bucket_name = "churnado-features",
+                            option = "upsert", 
+                            keys = c("subscription_id"))
   # build model
   mod <- build_model(df)
   
