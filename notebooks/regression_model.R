@@ -59,8 +59,33 @@ build_model <- function(df) {
 }
 
 
+# get predictive model
+get_model <- function(model_name, data) {
+  
+  # if the model isn't specified
+  if(is.na(model_name)) {
+    
+    # build the model
+    mod <- build_model(data)
+    
+    # save the model
+    save(mod, file = paste0("logistic_regression", Sys.time(), ".rda"))
+    
+    # return the model
+    mod
+    
+  } else {
+    
+    # retrieve saved model
+    load(model_name)
+    mod
+  }
+  
+}
+
+
 # make predictions
-make_predictions <- function(model, new_data) {
+make_predictions <- function(mod, new_data) {
   
   print("Making predictions.")
   
@@ -85,7 +110,7 @@ make_predictions <- function(model, new_data) {
 main <- function() {
   
   # set training date
-  training_date <- '2018-06-01'
+  training_date <- '2018-05-01'
   
   # get data and clean it
   df <- get_data(training_date)
@@ -103,7 +128,7 @@ main <- function() {
                             keys = c("subscription_id"))
   
   # build model
-  mod <- build_model(df)
+  mod <- get_model(model_name = "logistic_regression_1.rda", data = df)
   
   # make predictions
   predictions <- make_predictions(mod, df)
